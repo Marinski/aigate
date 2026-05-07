@@ -54,8 +54,8 @@ services:
     security_opt:
       - no-new-privileges:true
     networks:
-      - litellm-internal
-      - litellm-public
+      - aigate-internal
+      - aigate-public
 
   litellm:
     build: ./litellm
@@ -103,8 +103,8 @@ services:
     security_opt:
       - no-new-privileges:true
     networks:
-      - litellm-internal
-      - litellm-public
+      - aigate-internal
+      - aigate-public
 
   claudebox:
     profiles: ["claudebox"]
@@ -129,8 +129,8 @@ services:
       retries: 5
       start_period: 30s
     networks:
-      - litellm-internal
-      - litellm-public
+      - aigate-internal
+      - aigate-public
 
   claudebox-zai:
     profiles: ["claudebox-zai"]
@@ -160,8 +160,8 @@ services:
       retries: 5
       start_period: 30s
     networks:
-      - litellm-internal
-      - litellm-public
+      - aigate-internal
+      - aigate-public
 
   hybrids3:
     profiles: ["hybrids3"]
@@ -190,7 +190,7 @@ services:
     security_opt:
       - no-new-privileges:true
     networks:
-      - litellm-internal
+      - aigate-internal
 
   redis:
     image: redis:7.4.8-alpine
@@ -209,7 +209,7 @@ services:
     security_opt:
       - no-new-privileges:true
     networks:
-      - litellm-internal
+      - aigate-internal
 
   postgres-init:
     image: alpine:3.21
@@ -245,7 +245,7 @@ services:
     security_opt:
       - no-new-privileges:true
     networks:
-      - litellm-internal
+      - aigate-internal
 
   # ── Stealthy Auto Browse cluster ─────────────────────────────────────────────
 
@@ -304,7 +304,7 @@ services:
       - no-new-privileges:true
     networks:
       - stealthy-auto-browse
-      - litellm-internal
+      - aigate-internal
 
   # ── Speaches (local transcription — faster-whisper + Parakeet TDT) ──────────
 
@@ -336,7 +336,7 @@ services:
     security_opt:
       - no-new-privileges:true
     networks:
-      - litellm-internal
+      - aigate-internal
 
   speaches-pull:
     profiles: ["speaches"]
@@ -354,7 +354,7 @@ services:
     volumes:
       - ${DATA_DIR_SPEACHES:-${DATA_DIR:-.data}/speaches}:/home/ubuntu/.cache/huggingface/hub
     networks:
-      - litellm-public
+      - aigate-public
 
   # ── Speaches CUDA (CUDA Whisper STT) ────────────────────────────────────────
 
@@ -393,7 +393,7 @@ services:
     security_opt:
       - no-new-privileges:true
     networks:
-      - litellm-internal
+      - aigate-internal
 
   # ── Ollama (local inference) ─────────────────────────────────────────────────
 
@@ -409,8 +409,8 @@ services:
     volumes:
       - ${DATA_DIR_OLLAMA:-${DATA_DIR:-.data}/ollama}:/root/.ollama
     networks:
-      - litellm-internal
-      - litellm-public
+      - aigate-internal
+      - aigate-public
 
   ollama-pull:
     profiles: ["ollama", "ollama-cuda"]
@@ -469,7 +469,7 @@ services:
       PULL_CPU: "${OLLAMA:-0}"
       PULL_CUDA: "${OLLAMA_CUDA:-0}"
     networks:
-      - litellm-public
+      - aigate-public
 
   # ── Ollama CUDA (NVIDIA, local inference) ────────────────────────────────────
 
@@ -495,8 +495,8 @@ services:
               count: all
               capabilities: [gpu]
     networks:
-      - litellm-internal
-      - litellm-public
+      - aigate-internal
+      - aigate-public
 
   # ── sd.cpp (local image generation — FLUX.1-schnell) ────────────────────────
 
@@ -531,7 +531,7 @@ services:
     security_opt:
       - no-new-privileges:true
     networks:
-      - litellm-internal
+      - aigate-internal
 
   sdcpp-cuda:
     profiles: ["sdcpp-cuda"]
@@ -571,7 +571,7 @@ services:
     security_opt:
       - no-new-privileges:true
     networks:
-      - litellm-internal
+      - aigate-internal
 
   sdcpp-pull:
     profiles: ["sdcpp", "sdcpp-cuda"]
@@ -622,7 +622,7 @@ services:
     volumes:
       - ${DATA_DIR_SDCPP:-${DATA_DIR:-.data}/sdcpp}:/models
     networks:
-      - litellm-public
+      - aigate-public
 
   # ── Qwen3 CUDA TTS (CUDA-accelerated TTS, voice cloning) ────────────────────
 
@@ -661,8 +661,8 @@ services:
     security_opt:
       - no-new-privileges:true
     networks:
-      - litellm-internal
-      - litellm-public
+      - aigate-internal
+      - aigate-public
 
   # ── MCP tools (image generation + TTS, extensible) ─────────────────────────
 
@@ -699,8 +699,8 @@ services:
     security_opt:
       - no-new-privileges:true
     networks:
-      - litellm-internal
-      - litellm-public
+      - aigate-internal
+      - aigate-public
 
   # ── LibreChat (web UI for LLM interaction) ──────────────────────────────────
 
@@ -723,7 +723,7 @@ services:
     security_opt:
       - no-new-privileges:true
     networks:
-      - litellm-internal
+      - aigate-internal
 
   librechat:
     profiles: ["librechat"]
@@ -770,7 +770,7 @@ services:
     security_opt:
       - no-new-privileges:true
     networks:
-      - litellm-internal
+      - aigate-internal
 
   # ── proxq (async job queue proxy for LiteLLM) ──────────────────────────────
 
@@ -798,7 +798,7 @@ services:
     security_opt:
       - no-new-privileges:true
     networks:
-      - litellm-internal
+      - aigate-internal
 
   cloudflared:
     profiles: ["cloudflared"]
@@ -813,7 +813,7 @@ services:
     security_opt:
       - no-new-privileges:true
     networks:
-      - litellm-public
+      - aigate-public
 
   # ── SearXNG (self-hosted meta search engine) ─────────────────────────────────
 
@@ -842,8 +842,8 @@ services:
     security_opt:
       - no-new-privileges:true
     networks:
-      - litellm-internal
-      - litellm-public
+      - aigate-internal
+      - aigate-public
 
   searxng:
     profiles: ["searxng"]
@@ -863,8 +863,44 @@ services:
     security_opt:
       - no-new-privileges:true
     networks:
-      - litellm-internal
-      - litellm-public
+      - aigate-internal
+      - aigate-public
+
+  # ── Tailscale (tailnet-only HTTP proxy to nginx) ─────────────────────────────
+
+  tailscale:
+    profiles: ["tailscale"]
+    image: tailscale/tailscale:v1.82.0
+    restart: unless-stopped
+    mem_limit: ${TAILSCALE_MEM_LIMIT:-256m}
+    memswap_limit: ${TAILSCALE_MEMSWAP_LIMIT:-512m}
+    cpus: ${TAILSCALE_CPUS:-0.5}
+    dns:
+      - 100.100.100.100
+      - 127.0.0.11
+    depends_on:
+      - nginx
+    environment:
+      TS_AUTHKEY: ${TS_AUTHKEY:-}
+      TS_HOSTNAME: ${TS_HOSTNAME:-aigate}
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_SERVE_CONFIG: /config/serve.json
+      TS_USERSPACE: "false"
+      TS_EXTRA_ARGS: ${TS_EXTRA_ARGS:-}
+    volumes:
+      - ${DATA_DIR_TAILSCALE:-${DATA_DIR:-.data}/tailscale}:/var/lib/tailscale
+      - /dev/net/tun:/dev/net/tun
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    sysctls:
+      net.ipv4.ip_forward: 1
+      net.ipv6.conf.all.forwarding: 1
+    configs:
+      - source: ts_serve_conf
+        target: /config/serve.json
+    networks:
+      - aigate-public
 
 configs:
   nginx_conf:
@@ -1183,8 +1219,16 @@ configs:
           ttl: "${HYBRIDS3_UPLOADS_TTL:-168h}"
           max_file_size: "${HYBRIDS3_UPLOADS_MAX_SIZE:-100MB}"
 
+  ts_serve_conf:
+    content: |
+      {
+        "TCP": {
+          "${TS_SERVE_PORT:-80}": { "TCPForward": "nginx:4000" }
+        }
+      }
+
 networks:
-  litellm-internal:
+  aigate-internal:
     internal: true
-  litellm-public:
+  aigate-public:
   stealthy-auto-browse:

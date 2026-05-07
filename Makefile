@@ -87,6 +87,11 @@ ifeq ($(strip $(TELETHON)),1)
   _PROFILES += telethon
 endif
 
+# tailscale: opt-in with TAILSCALE=1
+ifeq ($(strip $(TAILSCALE)),1)
+  _PROFILES += tailscale
+endif
+
 
 # mcp: auto-enabled when any image, TTS, or search provider is active
 _HAS_MCP :=
@@ -159,7 +164,7 @@ run-bg:
 	docker compose up -d --build --force-recreate
 
 down:
-	COMPOSE_PROFILES=claudebox,claudebox-zai,cloudflared,hybrids3,browser,ollama,ollama-cuda,sdcpp,sdcpp-cuda,speaches,speaches-cuda,qwen3-cuda-tts,mcp,librechat,searxng,telethon \
+	COMPOSE_PROFILES=claudebox,claudebox-zai,cloudflared,hybrids3,browser,ollama,ollama-cuda,sdcpp,sdcpp-cuda,speaches,speaches-cuda,qwen3-cuda-tts,mcp,librechat,searxng,telethon,tailscale \
 		docker compose down --remove-orphans
 
 restart: down run-bg
@@ -203,6 +208,8 @@ help:
 	@echo "  qwen-tts-cuda set QWEN_TTS_CUDA=1 (NVIDIA GPU TTS)"
 	@echo "  librechat     set LIBRECHAT=1"
 	@echo "  searxng       set SEARXNG=1 (meta search engine + MCP tool)"
+	@echo "  telethon      set TELETHON=1 (Telegram client REST API + MCP)"
+	@echo "  tailscale     set TAILSCALE=1 (tailnet-only HTTP proxy to nginx)"
 
 	@echo "  mcp           (auto: any image/TTS/search provider enabled)"
 	@echo ""

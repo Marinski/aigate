@@ -45,7 +45,7 @@ Enable what you want in `.env`, ignore what you don't. The core stack (nginx, Li
 ```
 client
   ▼
-cloudflared (CLOUDFLARED=1)
+cloudflared (CLOUDFLARED=1) │ tailscale (TAILSCALE=1, tailnet-only)
   ▼
 nginx :4000                                          ┌──────────── always on ────────────┐
   ├─► /claudebox/            → claudebox             │ nginx, LiteLLM, PostgreSQL, Redis │
@@ -102,6 +102,7 @@ Default writable locations:
 | `.data/sdcpp/models/`                        | sdcpp, sdcpp-cuda            | Downloaded stable-diffusion model weights (shared between CPU and CUDA)                    |
 | `.data/librechat/`                           | librechat, librechat-mongodb | Conversation data (MongoDB), file uploads                                                  |
 | `.data/cloudflared/`                         | cloudflared                  | Tunnel config and credentials (if using named tunnel)                                      |
+| `.data/tailscale/`                           | tailscale                    | Tailscale node state (machine key, DERP info) — auto-created on first run                  |
 
 ## Services
 
@@ -127,6 +128,7 @@ Default writable locations:
 | **[SearXNG](https://github.com/searxng/searxng)** _(optional, `SEARXNG=1`)_                                    | Self-hosted meta-search engine at `/searxng/`. Aggregates Google, Bing, DuckDuckGo, Wikipedia. No API key needed — runs entirely locally. Also powers the MCP `search_web` tool so any function-calling model can search the web autonomously. Protected by nginx admin auth.                                                                                                 |
 | **[Telethon Plus](https://github.com/psyb0t/docker-telethon-plus)** _(optional, `TELETHON=1`)_                 | Telegram client at `/telethon/`. REST API and MCP server — send/read/edit/delete messages, list dialogs, forward messages, send files from URL, manage group membership. Requires a Telegram API ID/hash and a string session (see [my.telegram.org/apps](https://my.telegram.org/apps)). Bearer token auth.                                                                  |
 | **cloudflared** _(optional, `CLOUDFLARED=1`)_                                                                  | Cloudflare Tunnel. Disabled by default — enable with `CLOUDFLARED=1` in `.env`. Runs a quick tunnel (random `*.trycloudflare.com` URL, no account) or a named tunnel (fixed domain, requires config file and credentials).                                                                                                                                                    |
+| **tailscale** _(optional, `TAILSCALE=1`)_                                                                      | Tailscale node running [`tailscale serve`](https://tailscale.com/kb/1242/tailscale-serve). Proxies to nginx on the tailnet only — no public exposure, no port forwarding. Set `TS_AUTHKEY` and `TS_HOSTNAME`, then access aigate at `https://<hostname>.<tailnet>.ts.net` from any tailnet-joined device.                                                                       |
 
 ## Security and Exposure
 
@@ -141,6 +143,10 @@ Default writable locations:
 **Public exposure** — if you want to reach the gateway from outside, use Cloudflare Tunnel instead of opening ports. Set `CLOUDFLARED=1` in `.env` for a quick `*.trycloudflare.com` URL (no account needed), or configure a named tunnel for a fixed custom domain. Traffic goes through Cloudflare's network before it reaches nginx — DDoS protection and TLS termination included.
 
 → [Cloudflare Tunnel setup](docs/services-reference.md#cloudflared-optional)
+
+**Tailnet-only access** — if you only need access from your own devices and don't want to be on the public internet at all, set `TAILSCALE=1` to run a Tailscale node that proxies to nginx via `tailscale serve`. No port forwarding, no DNS, no certificates to manage — just `https://aigate.<your-tailnet>.ts.net` from any device on your tailnet.
+
+→ [Tailscale setup](docs/services-reference.md#tailscale-optional-tailscale1)
 
 ## MCP Tools
 
@@ -332,6 +338,7 @@ Everything is opt-in via flags in `.env`. API keys are stored separately and nev
 | `SEARXNG=1`       | SearXNG meta-search at `/searxng/` + MCP `search_web` tool                                |
 | `TELETHON=1`      | Telegram client at `/telethon/` + MCP Telegram tools                                      |
 | `CLOUDFLARED=1`   | Cloudflare Tunnel                                                                         |
+| `TAILSCALE=1`     | Tailscale node — tailnet-only HTTP proxy to nginx (no public exposure)                    |
 
 `make run` regenerates `litellm/config.yaml` before starting — only enabled providers are included, fallback chains are filtered to match.
 
