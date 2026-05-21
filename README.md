@@ -16,7 +16,7 @@ MCP tools across multiple servers. Any model with function calling can invoke th
 - **Agentic Claude Code ×2** — full shell access, persistent workspaces, file I/O, tool use. One instance on your Claude subscription or API key, one running GLM models through z.ai.
 - **Object storage** — S3-compatible, public-read uploads, presigned URLs, auto-expiry. Plain HTTP and boto3.
 - **Image generation** — FLUX, DALL-E, Stable Diffusion (cloud + local CPU/CUDA via stable-diffusion.cpp) via MCP tools that return persistent URLs, not base64 blobs. Local models: sd-turbo, sdxl-turbo, sdxl-lightning, flux-schnell, juggernaut-xi.
-- **Text-to-speech** — Kokoro (CPU), Qwen3-TTS with voice cloning (CUDA), OpenAI TTS.
+- **Text-to-speech** — Kokoro (CPU, English+Chinese, voice presets), Piper (CPU, 17 models spanning 16 languages — multi-speaker models cover 1000+ English voices via `voice` field), Qwen3-TTS with voice cloning (CUDA), OpenAI TTS.
 - **Transcription** — Whisper (cloud + local CPU/CUDA), Parakeet (~3400× real-time on CPU).
 - **Web search** — SearXNG self-hosted meta-search (Google, Bing, DuckDuckGo, Wikipedia) via MCP `search_web` tool.
 
@@ -117,8 +117,8 @@ Default writable locations:
 | **[hybrids3](https://github.com/psyb0t/docker-hybrids3)** _(optional, `HYBRIDS3=1`)_                           | S3-compatible object storage. Plain HTTP upload/download, boto3-compatible, bearer token auth, auto-expiry, MCP server. The `uploads` bucket is public-read — files are accessible by direct URL without signing.                                                                                                                                                             |
 | **[stealthy-auto-browse](https://github.com/psyb0t/docker-stealthy-auto-browse)** _(optional, `BROWSER=1`)_    | 5 Camoufox (hardened Firefox) replicas behind HAProxy. Real OS-level mouse and keyboard input via PyAutoGUI — no CDP exposure. Passes Cloudflare, CreepJS, BrowserScan, Pixelscan. Redis cookie sync across replicas. REST API and MCP server.                                                                                                                                |
 | **Ollama** _(optional, `OLLAMA=1`)_                                                                            | Local CPU inference. Runs llama3.2:3b, qwen3:4b, smollm2:1.7b, qwen2.5-coder:1.5b, qwen2.5-coder:3b, phi4-mini, gemma4:e2b, gemma3:4b (vision), nuextract-v1.5 (structured extraction), bge-m3, qwen3-embedding:0.6b (embeddings), dolphin-phi. Models are downloaded automatically on first start and cached in `.data/ollama/`. No GPU required.                            |
-| **Ollama CUDA** _(optional, `OLLAMA_CUDA=1`)_                                                                  | Local NVIDIA GPU inference. Runs all CPU models on GPU plus: qwen3:8b, gemma4:e4b, qwen2.5-coder:7b, deepseek-coder-v2:16b, llama3.1:8b, qwen3-abliterated:16b, gemma4-abliterated:e4b (uncensored vision), deepseek-r1:8b. Flash attention and KV cache enabled. Shares model storage with CPU ollama — no duplicate downloads. Requires `nvidia-container-toolkit`.         |
-| **Speaches** _(optional, `SPEACHES=1`)_                                                                        | Local CPU audio via [speaches-ai/speaches](https://github.com/speaches-ai/speaches). Transcription: `faster-distil-whisper-large-v3` (multilingual) and `parakeet-tdt-0.6b-v2` (English, ~3400× real-time on CPU). Text-to-speech: `Kokoro-82M` int8 (high-quality, multiple voices). Models cached in `.data/speaches/`.                                                     |
+| **Ollama CUDA** _(optional, `OLLAMA_CUDA=1`)_                                                                  | Local NVIDIA GPU inference. Runs all CPU models on GPU plus: qwen3:8b, qwen3:30b-a3b (MoE generalist), qwen2.5vl:7b (vision-language), gemma4:e4b, qwen2.5-coder:7b, deepseek-coder-v2:16b, llama3.1:8b, qwen3-abliterated:16b, gemma4-abliterated:e4b (uncensored vision), deepseek-r1:8b, deepseek-r1:14b (R1-Distill-Qwen-14B), phi4-reasoning:plus (math/reasoning specialist). Flash attention and KV cache enabled. Shares model storage with CPU ollama — no duplicate downloads. Requires `nvidia-container-toolkit`.         |
+| **Speaches** _(optional, `SPEACHES=1`)_                                                                        | Local CPU audio via [speaches-ai/speaches](https://github.com/speaches-ai/speaches). Transcription: `faster-distil-whisper-large-v3` (multilingual) and `parakeet-tdt-0.6b-v2` (English, ~3400× real-time on CPU). Text-to-speech: `Kokoro-82M` int8 (high-quality, English+Chinese-leaning) plus 17 curated Piper TTS models spanning 16 languages. Multi-speaker piper models (LibriTTS English-US with 904 speakers, VCTK English-UK with 109, MLS-FR/NL multi-speaker, Swedish NST) expose individual speakers via the OpenAI `voice` field; single-speaker models ignore `voice`. All lazy-downloaded on first request. Models cached in `.data/speaches/`.                                                     |
 | **Speaches CUDA** _(optional, `SPEACHES_CUDA=1`)_                                                              | CUDA-accelerated Whisper STT via speaches. Uses the same model cache as CPU speaches. Shares `.data/speaches/` — no separate download. Requires `nvidia-container-toolkit`.                                                                                                                                                                                                   |
 | **Qwen3 CUDA TTS** _(optional, `QWEN_TTS_CUDA=1`)_                                                             | CUDA-accelerated TTS via [faster-qwen3-tts](https://github.com/andimarafioti/faster-qwen3-tts). Runs `Qwen3-TTS-12Hz-0.6B-Base` with CUDA graphs. Voice cloning via reference audio. Models cached in `.data/qwen3-tts/`. Requires `nvidia-container-toolkit`.                                                                                                                |
 | **sd.cpp CPU** _(optional, `SDCPP=1`)_                                                                         | Local CPU image generation via [stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp). Go wrapper with OpenAI-compatible `/v1/images/generations` endpoint, model hot-swap, idle timeout auto-unload. Models: sd-turbo, sdxl-turbo. Models cached in `.data/sdcpp/models/`.                                                                                   |
@@ -211,12 +211,16 @@ CUDA models run with flash attention and quantized KV cache. See [Resource manag
 | Model name                                 | Description                                                      | VRAM   |
 | ------------------------------------------ | ---------------------------------------------------------------- | ------ |
 | `local-ollama-cuda-qwen3-8b`               | General chat — thinking mode                                     | ~5GB   |
+| `local-ollama-cuda-qwen3-30b-a3b`          | Generalist MoE — 30B total / 3B active, fast on CUDA             | ~17GB  |
 | `local-ollama-cuda-llama3.1-8b`            | General chat                                                     | ~5GB   |
 | `local-ollama-cuda-gemma4-e2b`             | General chat + vision (Gemma 4, 2.3B effective)                  | ~7.2GB |
 | `local-ollama-cuda-gemma4-e4b`             | General chat + vision — higher quality (Gemma 4, 4.5B effective) | ~9.6GB |
+| `local-ollama-cuda-qwen2.5vl-7b`           | Vision-language — OCR, screenshots, charts, docs                 | ~5GB   |
 | `local-ollama-cuda-qwen2.5-coder-7b`       | Code                                                             | ~5GB   |
 | `local-ollama-cuda-deepseek-coder-v2-16b`  | Code — MoE, 2.4B active, 160K ctx                                | ~8.9GB |
 | `local-ollama-cuda-deepseek-r1-8b`         | Reasoning / thinking model                                       | ~5.2GB |
+| `local-ollama-cuda-deepseek-r1-14b`        | Reasoning — R1-Distill-Qwen-14B, stronger sibling of 8B          | ~9GB   |
+| `local-ollama-cuda-phi4-reasoning-plus`    | Math / structured reasoning specialist (Microsoft, 14B + RL)     | ~11GB  |
 | `local-ollama-cuda-qwen3-abliterated-16b`  | Uncensored — abliterated Qwen3                                   | ~9.8GB |
 | `local-ollama-cuda-gemma4-abliterated-e4b` | Uncensored + vision — abliterated Gemma 4                        | ~9.6GB |
 | `local-ollama-cuda-dolphin-phi`            | Uncensored assistant (tiny)                                      | ~1.6GB |
@@ -240,9 +244,26 @@ CUDA models run with flash attention and quantized KV cache. See [Resource manag
 
 ### Local text-to-speech (Speaches, CPU — `SPEACHES=1`)
 
-| Model name                  | Description                                                                          |
-| --------------------------- | ------------------------------------------------------------------------------------ |
-| `local-speaches-kokoro-tts` | Kokoro 82M int8 — high-quality, multiple voices (af_heart, af_alloy, af_bella, etc.) |
+| Model name                              | Description                                                                          |
+| --------------------------------------- | ------------------------------------------------------------------------------------ |
+| `local-speaches-kokoro-tts`                       | Kokoro 82M int8 — high-quality, multiple voices via `voice` field (af_heart, af_alloy, af_bella, am_adam, am_michael, bf_emma, jf_alpha, zf_xiaobei, etc.).                                  |
+| `local-speaches-piper-en_US-libritts-high`        | Piper — English (US), **multi-speaker** (904 speakers from LibriTTS). Select speaker via `voice: "<id>"` where `<id>` is `"0"`..`"903"`. High quality. ONNX, CPU-realtime, lazy-downloaded. |
+| `local-speaches-piper-en_GB-vctk-medium`          | Piper — English (UK), **multi-speaker** (109 speakers from VCTK corpus). Select via `voice: "0"`..`"108"`.                                                                                  |
+| `local-speaches-piper-de_DE-thorsten-high`        | Piper — German, single speaker (Thorsten, male, high quality). `voice` ignored.                                                                                                             |
+| `local-speaches-piper-fr_FR-mls-medium`           | Piper — French, **multi-speaker** (MLS-FR). Select via `voice: "<id>"`.                                                                                                                     |
+| `local-speaches-piper-es_ES-davefx-medium`        | Piper — Spanish (Spain), single speaker (DaveFX, male).                                                                                                                                     |
+| `local-speaches-piper-it_IT-paola-medium`         | Piper — Italian, single speaker (Paola, female).                                                                                                                                            |
+| `local-speaches-piper-nl_NL-mls-medium`           | Piper — Dutch, **multi-speaker** (MLS-NL). Select via `voice: "<id>"`.                                                                                                                      |
+| `local-speaches-piper-pl_PL-darkman-medium`       | Piper — Polish, single speaker (Darkman, male).                                                                                                                                             |
+| `local-speaches-piper-pt_BR-faber-medium`         | Piper — Portuguese (Brazil), single speaker (Faber, male).                                                                                                                                  |
+| `local-speaches-piper-ro_RO-mihai-medium`         | Piper — Romanian, single speaker (Mihai, male).                                                                                                                                             |
+| `local-speaches-piper-ru_RU-irina-medium`         | Piper — Russian, single speaker (Irina, female).                                                                                                                                            |
+| `local-speaches-piper-sv_SE-nst-medium`           | Piper — Swedish, **multi-speaker** (NST corpus). Select via `voice: "<id>"`.                                                                                                                |
+| `local-speaches-piper-tr_TR-fahrettin-medium`     | Piper — Turkish, single speaker (Fahrettin, male).                                                                                                                                          |
+| `local-speaches-piper-uk_UA-ukrainian_tts-medium` | Piper — Ukrainian, single speaker (Ukrainian-TTS).                                                                                                                                          |
+| `local-speaches-piper-vi_VN-vais1000-medium`      | Piper — Vietnamese, single speaker (VAIS1000).                                                                                                                                              |
+| `local-speaches-piper-zh_CN-huayan-medium`        | Piper — Chinese (Mandarin), single speaker (Huayan, female).                                                                                                                                |
+| `local-speaches-piper-ar_JO-kareem-medium`        | Piper — Arabic (Jordan), single speaker (Kareem, male).                                                                                                                                     |
 
 ### Local transcription (CUDA — `SPEACHES_CUDA=1`)
 
@@ -420,6 +441,20 @@ curl http://localhost:4000/audio/speech \
   -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
   -H "Content-Type: application/json" \
   -d '{"model": "local-speaches-kokoro-tts", "input": "Hello world", "voice": "af_heart"}' \
+  -o speech.mp3
+
+# text-to-speech (local CPU — Piper single-speaker; model IS the voice)
+curl http://localhost:4000/audio/speech \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model": "local-speaches-piper-de_DE-thorsten-high", "input": "Hallo Welt"}' \
+  -o speech.mp3
+
+# text-to-speech (local CPU — Piper multi-speaker; voice = numeric speaker ID)
+curl http://localhost:4000/audio/speech \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model": "local-speaches-piper-en_US-libritts-high", "voice": "42", "input": "Hello world"}' \
   -o speech.mp3
 
 # text-to-speech (local CUDA — Qwen3-TTS, voice cloning)

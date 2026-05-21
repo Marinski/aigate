@@ -1,6 +1,7 @@
-# Build stage: pull official litellm image (post-1.83.0 CVE patches)
-# Using nightly until v1.83.x-stable is tagged; pin digest for reproducibility
-FROM ghcr.io/berriai/litellm:v1.83.5-nightly AS base
+# Build stage: pull official litellm image
+# v1.83.14-stable.patch.2 — patched for CVE-2026-42208 (pre-auth SQLi, fixed in v1.83.7+)
+# and post-supply-chain-incident (clean v1.83.x line, new CI/CD v2 pipeline). Cosign-signed.
+FROM ghcr.io/berriai/litellm:v1.83.14-stable.patch.2 AS base
 
 # ── Custom callbacks ─────────────────────────────────────────────────────────
 COPY callbacks/ /app/callbacks/

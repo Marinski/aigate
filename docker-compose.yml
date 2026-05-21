@@ -108,7 +108,7 @@ services:
 
   claudebox:
     profiles: ["claudebox"]
-    image: psyb0t/claudebox:v1.9.0-minimal
+    image: psyb0t/claudebox:v1.13.1-minimal
     restart: unless-stopped
     mem_limit: ${CLAUDEBOX_MEM_LIMIT:-1g}
     memswap_limit: ${CLAUDEBOX_MEMSWAP_LIMIT:-2g}
@@ -134,7 +134,7 @@ services:
 
   claudebox-zai:
     profiles: ["claudebox-zai"]
-    image: psyb0t/claudebox:v1.9.0-minimal
+    image: psyb0t/claudebox:v1.13.1-minimal
     restart: unless-stopped
     mem_limit: ${CLAUDEBOX_ZAI_MEM_LIMIT:-1g}
     memswap_limit: ${CLAUDEBOX_ZAI_MEMSWAP_LIMIT:-2g}
@@ -193,7 +193,7 @@ services:
       - aigate-internal
 
   redis:
-    image: redis:7.4.8-alpine
+    image: redis:7.4.9-alpine
     restart: unless-stopped
     mem_limit: ${REDIS_MEM_LIMIT:-256m}
     memswap_limit: ${REDIS_MEMSWAP_LIMIT:-512m}
@@ -251,7 +251,7 @@ services:
 
   stealthy-auto-browse-redis:
     profiles: ["browser"]
-    image: redis:7.4.8-alpine
+    image: redis:7.4.9-alpine
     restart: unless-stopped
     mem_limit: ${SAB_REDIS_MEM_LIMIT:-128m}
     memswap_limit: ${SAB_REDIS_MEMSWAP_LIMIT:-256m}
@@ -444,6 +444,8 @@ services:
           until OLLAMA_HOST=http://ollama-cuda:11434 ollama list > /dev/null 2>&1; do sleep 2; done;
           export OLLAMA_HOST=http://ollama-cuda:11434;
           pull qwen3:8b &&
+          pull qwen3:30b-a3b &&
+          pull qwen2.5vl:7b &&
           pull gemma4:e4b &&
           pull gemma4:e2b &&
           pull qwen2.5-coder:7b &&
@@ -452,6 +454,8 @@ services:
           pull huihui_ai/qwen3-abliterated:16b &&
           pull huihui_ai/gemma-4-abliterated:e4b &&
           pull deepseek-r1:8b &&
+          pull deepseek-r1:14b &&
+          pull phi4-reasoning:plus &&
           pull dolphin-phi:latest &&
           pull bge-m3 &&
           pull qwen3-embedding:0.6b &&

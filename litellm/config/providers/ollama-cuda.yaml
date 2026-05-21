@@ -6,6 +6,22 @@
       options:
         num_gpu: 99
 
+- model_name: local-ollama-cuda-qwen3-30b-a3b
+  litellm_params:
+    model: ollama/qwen3:30b-a3b
+    api_base: http://ollama-cuda:11434
+    extra_body:
+      options:
+        num_gpu: 99
+
+- model_name: local-ollama-cuda-qwen2.5vl-7b
+  litellm_params:
+    model: ollama/qwen2.5vl:7b
+    api_base: http://ollama-cuda:11434
+    extra_body:
+      options:
+        num_gpu: 99
+
 - model_name: local-ollama-cuda-gemma4-e4b
   litellm_params:
     model: ollama/gemma4:e4b
@@ -65,6 +81,22 @@
 - model_name: local-ollama-cuda-deepseek-r1-8b
   litellm_params:
     model: ollama/deepseek-r1:8b
+    api_base: http://ollama-cuda:11434
+    extra_body:
+      options:
+        num_gpu: 99
+
+- model_name: local-ollama-cuda-deepseek-r1-14b
+  litellm_params:
+    model: ollama/deepseek-r1:14b
+    api_base: http://ollama-cuda:11434
+    extra_body:
+      options:
+        num_gpu: 99
+
+- model_name: local-ollama-cuda-phi4-reasoning-plus
+  litellm_params:
+    model: ollama/phi4-reasoning:plus
     api_base: http://ollama-cuda:11434
     extra_body:
       options:

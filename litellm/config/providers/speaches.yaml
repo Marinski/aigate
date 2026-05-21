@@ -21,3 +21,139 @@
     api_key: none
   model_info:
     mode: audio_speech
+
+- model_name: local-speaches-piper-en_US-libritts-high
+  litellm_params:
+    model: openai/speaches-ai/piper-en_US-libritts-high
+    api_base: http://speaches:8000/v1
+    api_key: none
+  model_info:
+    mode: audio_speech
+
+- model_name: local-speaches-piper-en_GB-vctk-medium
+  litellm_params:
+    model: openai/speaches-ai/piper-en_GB-vctk-medium
+    api_base: http://speaches:8000/v1
+    api_key: none
+  model_info:
+    mode: audio_speech
+
+- model_name: local-speaches-piper-de_DE-thorsten-high
+  litellm_params:
+    model: openai/speaches-ai/piper-de_DE-thorsten-high
+    api_base: http://speaches:8000/v1
+    api_key: none
+  model_info:
+    mode: audio_speech
+
+- model_name: local-speaches-piper-fr_FR-mls-medium
+  litellm_params:
+    model: openai/speaches-ai/piper-fr_FR-mls-medium
+    api_base: http://speaches:8000/v1
+    api_key: none
+  model_info:
+    mode: audio_speech
+
+- model_name: local-speaches-piper-es_ES-davefx-medium
+  litellm_params:
+    model: openai/speaches-ai/piper-es_ES-davefx-medium
+    api_base: http://speaches:8000/v1
+    api_key: none
+  model_info:
+    mode: audio_speech
+
+- model_name: local-speaches-piper-it_IT-paola-medium
+  litellm_params:
+    model: openai/speaches-ai/piper-it_IT-paola-medium
+    api_base: http://speaches:8000/v1
+    api_key: none
+  model_info:
+    mode: audio_speech
+
+- model_name: local-speaches-piper-nl_NL-mls-medium
+  litellm_params:
+    model: openai/speaches-ai/piper-nl_NL-mls-medium
+    api_base: http://speaches:8000/v1
+    api_key: none
+  model_info:
+    mode: audio_speech
+
+- model_name: local-speaches-piper-pl_PL-darkman-medium
+  litellm_params:
+    model: openai/speaches-ai/piper-pl_PL-darkman-medium
+    api_base: http://speaches:8000/v1
+    api_key: none
+  model_info:
+    mode: audio_speech
+
+- model_name: local-speaches-piper-pt_BR-faber-medium
+  litellm_params:
+    model: openai/speaches-ai/piper-pt_BR-faber-medium
+    api_base: http://speaches:8000/v1
+    api_key: none
+  model_info:
+    mode: audio_speech
+
+- model_name: local-speaches-piper-ro_RO-mihai-medium
+  litellm_params:
+    model: openai/speaches-ai/piper-ro_RO-mihai-medium
+    api_base: http://speaches:8000/v1
+    api_key: none
+  model_info:
+    mode: audio_speech
+
+- model_name: local-speaches-piper-ru_RU-irina-medium
+  litellm_params:
+    model: openai/speaches-ai/piper-ru_RU-irina-medium
+    api_base: http://speaches:8000/v1
+    api_key: none
+  model_info:
+    mode: audio_speech
+
+- model_name: local-speaches-piper-sv_SE-nst-medium
+  litellm_params:
+    model: openai/speaches-ai/piper-sv_SE-nst-medium
+    api_base: http://speaches:8000/v1
+    api_key: none
+  model_info:
+    mode: audio_speech
+
+- model_name: local-speaches-piper-tr_TR-fahrettin-medium
+  litellm_params:
+    model: openai/speaches-ai/piper-tr_TR-fahrettin-medium
+    api_base: http://speaches:8000/v1
+    api_key: none
+  model_info:
+    mode: audio_speech
+
+- model_name: local-speaches-piper-uk_UA-ukrainian_tts-medium
+  litellm_params:
+    model: openai/speaches-ai/piper-uk_UA-ukrainian_tts-medium
+    api_base: http://speaches:8000/v1
+    api_key: none
+  model_info:
+    mode: audio_speech
+
+- model_name: local-speaches-piper-vi_VN-vais1000-medium
+  litellm_params:
+    model: openai/speaches-ai/piper-vi_VN-vais1000-medium
+    api_base: http://speaches:8000/v1
+    api_key: none
+  model_info:
+    mode: audio_speech
+
+- model_name: local-speaches-piper-zh_CN-huayan-medium
+  litellm_params:
+    model: openai/speaches-ai/piper-zh_CN-huayan-medium
+    api_base: http://speaches:8000/v1
+    api_key: none
+  model_info:
+    mode: audio_speech
+
+- model_name: local-speaches-piper-ar_JO-kareem-medium
+  litellm_params:
+    model: openai/speaches-ai/piper-ar_JO-kareem-medium
+    api_base: http://speaches:8000/v1
+    api_key: none
+  model_info:
+    mode: audio_speech

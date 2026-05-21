@@ -652,8 +652,11 @@
   },
   {
     "local-ollama-cuda-deepseek-r1-8b": [
+      "local-ollama-cuda-deepseek-r1-14b",
+      "local-ollama-cuda-phi4-reasoning-plus",
       "local-ollama-cuda-qwen3-8b",
       "local-ollama-cuda-llama3.1-8b",
+      "hf-deepseek-r1",
       "local-ollama-cpu-qwen3-4b"
     ]
   },
@@ -967,5 +970,48 @@
   },
   {
     "cohere-rerank": []
+  },
+  {
+    "local-ollama-cuda-phi4-reasoning-plus": [
+      "local-ollama-cuda-deepseek-r1-14b",
+      "local-ollama-cuda-deepseek-r1-8b",
+      "local-ollama-cuda-qwen3-30b-a3b",
+      "local-ollama-cuda-qwen3-8b",
+      "hf-deepseek-r1",
+      "cerebras-qwen3-235b",
+      "local-ollama-cpu-qwen3-4b"
+    ]
+  },
+  {
+    "local-ollama-cuda-deepseek-r1-14b": [
+      "local-ollama-cuda-phi4-reasoning-plus",
+      "local-ollama-cuda-deepseek-r1-8b",
+      "local-ollama-cuda-qwen3-30b-a3b",
+      "local-ollama-cuda-qwen3-8b",
+      "hf-deepseek-r1",
+      "cerebras-qwen3-235b",
+      "local-ollama-cpu-qwen3-4b"
+    ]
+  },
+  {
+    "local-ollama-cuda-qwen3-30b-a3b": [
+      "local-ollama-cuda-qwen3-abliterated-16b",
+      "local-ollama-cuda-qwen3-8b",
+      "local-ollama-cuda-llama3.1-8b",
+      "cerebras-qwen3-235b",
+      "or-qwen3-80b",
+      "mistral-large",
+      "local-ollama-cpu-qwen3-4b"
+    ]
+  },
+  {
+    "local-ollama-cuda-qwen2.5vl-7b": [
+      "local-ollama-cuda-gemma4-e4b",
+      "hf-qwen3-vl-8b",
+      "hf-qwen-vl-72b",
+      "groq-llama-4-scout",
+      "hf-llama-4-scout",
+      "openai-gpt-4o"
+    ]
   }
 ]
