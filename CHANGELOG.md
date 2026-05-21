@@ -2,6 +2,29 @@
 
 All notable changes to this project are documented here.
 
+## [v2.2.0] — 2026-05-21
+
+**Add mailbox — IMAP+SMTP gateway.**
+
+- New service `mailbox` at `/mailbox/` via [psyb0t/docker-mailbox](https://github.com/psyb0t/docker-mailbox) `v0.3.0`. Stateless gateway across N email accounts driven by a single YAML config — unified inbox, per-account list/search/CRUD, SMTP send. No database; every read hits the upstream IMAP server live.
+- Direct route only — not registered with LiteLLM (no chat/completion surface). `GET /mailbox/health` open; everything else gated on bearer token (`MAILBOX_AUTH_TOKEN`, which must also appear in the mailbox YAML's `auth.tokens:` list).
+- MCP enabled by default and registered with LiteLLM's `/mcp/` aggregator. Flat tool set (`mailbox-mailboxes`, `mailbox-inbox`, `mailbox-list_messages`, `mailbox-get_message`, `mailbox-search`, `mailbox-send`, `mailbox-mark_seen`, `mailbox-move`, `mailbox-delete`, …) — every per-account tool takes `mailbox` as a parameter, so the catalog stays flat regardless of how many inboxes are configured.
+- Config file holds plaintext IMAP/SMTP passwords + bearer tokens. `MAILBOX_CONFIG` is added to `Makefile`'s `check_file_vars` so the stack refuses to come up if the file isn't present. Template at `mailbox/config.example.yaml`; recommended host path `.data/mailbox/config.yaml` (auto-ignored under `.data/**`).
+- New tests in `tests/test_mailbox.sh`: open `/health`, auth enforcement on `/mailboxes`, `/mailboxes` returns ≥1 account, and presence of mailbox MCP tools through the aggregator. All gated on `MAILBOX=1`.
+- Nginx route `/mailbox/*` with `RATELIMIT_MAILBOX=60r/m` / `TIMEOUT_MAILBOX=120s` (IMAP fetches on large folders can be slow). New env vars documented in `.env.example`, `docs/services-reference.md`, `docs/mcp-tools.md`, and `README.md`.
+
+## [v2.1.0] — 2026-05-21
+
+**Add predictalot — foundation time-series forecasting.**
+
+- New service `predictalot` (and `predictalot-cuda` GPU variant) at `/predictalot/` via [psyb0t/docker-predictalot](https://github.com/psyb0t/docker-predictalot) `v0.1.1`.
+- Five univariate quantile forecasters behind one wire shape: `chronos-2` (Amazon), `timesfm-2.5` (Google), `moirai-2` (Salesforce), `toto-1` (Datadog), `sundial-base-128m` (Tsinghua) — plus `POST /v1/forecast/ensemble` for weighted-mean combinations.
+- Direct route only — not registered with LiteLLM (no chat/completion surface). Bearer token auth via `PREDICTALOT_AUTH_TOKEN`.
+- MCP enabled by default and registered with LiteLLM's `/mcp/` aggregator. Seven tools surfaced: `predictalot-forecast_{chronos_2,timesfm_2_5,moirai_2,toto_1,sundial_base_128m}`, `predictalot-forecast_ensemble`, `predictalot-list_models`.
+- Models lazy-load on first request (HF snapshots to `.data/predictalot/models/`, ~1.4GB total) and auto-unload when idle (`PREDICTALOT_MODEL_IDLE_TIMEOUT=30m` default). CPU and CUDA variants share the same data dir, are mutually exclusive (both bind the `predictalot` network alias), and are gated on `PREDICTALOT=1` / `PREDICTALOT_CUDA=1` respectively.
+- New tests in `tests/test_predictalot.sh`: `/v1/models` listing, auth enforcement, chronos-2 single forecast, unknown-model 404, and presence of all MCP tools through the aggregator. All gated on `PREDICTALOT=1` or `PREDICTALOT_CUDA=1`.
+- Nginx route `/predictalot/*` with `RATELIMIT_PREDICTALOT=60r/m` / `TIMEOUT_PREDICTALOT=600s` (cold model loads can be slow). New env vars documented in `.env.example`, `docs/services-reference.md`, `docs/mcp-tools.md`, and `README.md`.
+
 ## [v2.0.0] — 2026-05-21
 
 **BREAKING: replace `claudebox-zai` with `pibox-zai` (psyb0t/docker-pibox).**

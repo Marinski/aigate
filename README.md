@@ -56,6 +56,8 @@ nginx :4000                                          ┌────────
   ├─► /librechat/            → LibreChat (web UI, LIBRECHAT=1)
   ├─► /searxng/              → SearXNG (meta-search, SEARXNG=1)
   ├─► /telethon/             → Telethon (Telegram client, TELETHON=1)
+  ├─► /predictalot/          → predictalot (time-series forecasting, PREDICTALOT=1 / PREDICTALOT_CUDA=1)
+  ├─► /mailbox/              → mailbox (IMAP+SMTP gateway, MAILBOX=1)
   └─► /                      → LiteLLM (sync)
                                   ├─ Groq               (free: 30 RPM, 1K-14.4K RPD per model, GROQ=1)
                                   ├─ Cerebras           (free: 5 RPM / 30K TPM / 1M TPD, 4 models only, CEREBRAS=1)
@@ -81,7 +83,9 @@ MCP servers (all optional):
   ├─ claudebox             — agentic Claude Code via OAuth or API key (CLAUDEBOX=1)
   ├─ pibox_zai             — agentic pi-coding-agent via z.ai/GLM (PIBOX_ZAI=1)
   ├─ mcp_tools             — generate_image + generate_tts + search_web (auto-enabled with image/TTS/SearXNG)
-  └─ telethon              — Telegram send/read/edit messages, dialogs, files, group management (TELETHON=1)
+  ├─ telethon              — Telegram send/read/edit messages, dialogs, files, group management (TELETHON=1)
+  ├─ predictalot           — time-series forecasting via 5 foundation models + weighted ensemble (PREDICTALOT=1 / PREDICTALOT_CUDA=1)
+  └─ mailbox               — IMAP+SMTP gateway: inbox, list/search/send across N accounts (MAILBOX=1)
 ```
 
 All persistent data lives under `.data/` by default (bind mounts). Override the base with `DATA_DIR` or per-service with `DATA_DIR_*` env vars (e.g. `DATA_DIR_OLLAMA=/mnt/nas/ollama`) — see [`.env.example`](.env.example) for the full list. The default directory structure is tracked in git via `.gitkeep` files so the right directories exist on a fresh clone — contents are gitignored.
@@ -103,6 +107,7 @@ Default writable locations:
 | `.data/librechat/`                           | librechat, librechat-mongodb | Conversation data (MongoDB), file uploads                                                  |
 | `.data/cloudflared/`                         | cloudflared                  | Tunnel config and credentials (if using named tunnel)                                      |
 | `.data/tailscale/`                           | tailscale                    | Tailscale node state (machine key, DERP info) — auto-created on first run                  |
+| `.data/predictalot/models/`                  | predictalot, predictalot-cuda | Downloaded HuggingFace snapshots for the 5 forecasters (~1.4GB total)                     |
 
 ## Services
 
@@ -128,6 +133,8 @@ Default writable locations:
 | **[LibreChat](https://github.com/danny-avila/LibreChat)** _(optional, `LIBRECHAT=1`)_                          | Web UI for LLM interaction at `/librechat/`. Pre-configured with all LiteLLM models and MCP tools. MongoDB-backed conversation storage. Email/password auth — first registered user becomes admin, then set `LIBRECHAT_ALLOW_REGISTRATION=false` and restart. WebSocket streaming. Configurable via `.env` (registration, rate limits, debug logging, JWT secrets).           |
 | **[SearXNG](https://github.com/searxng/searxng)** _(optional, `SEARXNG=1`)_                                    | Self-hosted meta-search engine at `/searxng/`. Aggregates Google, Bing, DuckDuckGo, Wikipedia. No API key needed — runs entirely locally. Also powers the MCP `search_web` tool so any function-calling model can search the web autonomously. Protected by nginx admin auth.                                                                                                 |
 | **[Telethon Plus](https://github.com/psyb0t/docker-telethon-plus)** _(optional, `TELETHON=1`)_                 | Telegram client at `/telethon/`. REST API and MCP server — send/read/edit/delete messages, list dialogs, forward messages, send files from URL, manage group membership. Requires a Telegram API ID/hash and a string session (see [my.telegram.org/apps](https://my.telegram.org/apps)). Bearer token auth.                                                                  |
+| **[predictalot](https://github.com/psyb0t/docker-predictalot)** _(optional, `PREDICTALOT=1` / `PREDICTALOT_CUDA=1`)_ | Foundation time-series forecasting at `/predictalot/`. Five univariate quantile forecasters (chronos-2, timesfm-2.5, moirai-2, toto-1, sundial-base-128m) behind one wire shape, plus weighted ensemble. Direct route (not via LiteLLM); MCP enabled by default. Models lazy-load on first request and auto-unload when idle. CPU and CUDA variants — pick one.            |
+| **[mailbox](https://github.com/psyb0t/docker-mailbox)** _(optional, `MAILBOX=1`)_                               | Stateless IMAP+SMTP gateway at `/mailbox/`. Drives N email accounts from a single YAML config — unified inbox, per-account list/search/CRUD, SMTP send. MCP enabled by default with a flat tool set (`mailbox` parameter selects account). Holds plaintext creds, so `MAILBOX_CONFIG` must point at a gitignored YAML on the host (template at `mailbox/config.example.yaml`). |
 | **cloudflared** _(optional, `CLOUDFLARED=1`)_                                                                  | Cloudflare Tunnel. Disabled by default — enable with `CLOUDFLARED=1` in `.env`. Runs a quick tunnel (random `*.trycloudflare.com` URL, no account) or a named tunnel (fixed domain, requires config file and credentials).                                                                                                                                                    |
 | **tailscale** _(optional, `TAILSCALE=1`)_                                                                      | Tailscale node running [`tailscale serve`](https://tailscale.com/kb/1242/tailscale-serve). Proxies to nginx on the tailnet only — no public exposure, no port forwarding. Set `TS_AUTHKEY` and `TS_HOSTNAME`, then access aigate at `https://<hostname>.<tailnet>.ts.net` from any tailnet-joined device.                                                                       |
 
@@ -361,6 +368,9 @@ Everything is opt-in via flags in `.env`. API keys are stored separately and nev
 | `TELETHON=1`      | Telegram client at `/telethon/` + MCP Telegram tools                                      |
 | `CLOUDFLARED=1`   | Cloudflare Tunnel                                                                         |
 | `TAILSCALE=1`     | Tailscale node — tailnet-only HTTP proxy to nginx (no public exposure)                    |
+| `PREDICTALOT=1`   | predictalot at `/predictalot/` — time-series forecasting + MCP (CPU image)                |
+| `PREDICTALOT_CUDA=1` | predictalot CUDA variant (requires `nvidia-container-toolkit`)                         |
+| `MAILBOX=1`       | mailbox IMAP+SMTP gateway at `/mailbox/` + MCP (needs `MAILBOX_CONFIG` + `MAILBOX_AUTH_TOKEN`) |
 
 `make run` regenerates `litellm/config.yaml` before starting — only enabled providers are included, fallback chains are filtered to match.
 

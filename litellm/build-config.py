@@ -113,6 +113,8 @@ def active_mcp_servers(env):
         ("claudebox",     lambda e: is_flag(e, "CLAUDEBOX")),
         ("pibox-zai",     lambda e: is_flag(e, "PIBOX_ZAI")),
         ("telethon",      lambda e: is_flag(e, "TELETHON")),
+        ("mailbox",       lambda e: is_flag(e, "MAILBOX")),
+        ("predictalot",   lambda e: is_flag(e, "PREDICTALOT") or is_flag(e, "PREDICTALOT_CUDA")),
         ("mcp",           lambda e: any(
             is_flag(e, f) for f in ("HUGGINGFACE", "OPENAI", "SPEACHES", "SPEACHES_CUDA", "QWEN_TTS_CUDA", "SDCPP", "SDCPP_CUDA", "SEARXNG")
         )),

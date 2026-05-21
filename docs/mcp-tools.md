@@ -219,3 +219,71 @@ All chat references accept: `@username`, phone number, `t.me/...` link, or numer
 | `delete_chat`       | Delete a supergroup or channel you own |
 | `join_chat`         | Join a public channel or supergroup |
 | `leave_chat`        | Leave a channel or supergroup |
+
+---
+
+## predictalot — Time-series forecasting (`PREDICTALOT=1` or `PREDICTALOT_CUDA=1`)
+
+MCP server backed by [docker-predictalot](https://github.com/psyb0t/docker-predictalot). Exposes five univariate quantile forecasters plus a weighted ensemble. Inputs are lists of float series; outputs include a median point forecast and per-quantile arrays.
+
+See [services-reference.md](services-reference.md#predictalot-optional-predictalot1-or-predictalot_cuda1) for per-model trade-offs and accuracy benchmarks.
+
+### Tools
+
+| Tool                                  | Description |
+| ------------------------------------- | ----------- |
+| `forecast_chronos_2`                  | Amazon Chronos-2 — fastest on CPU, configurable quantiles |
+| `forecast_timesfm_2_5`                | Google TimesFM 2.5 — decoder-only, compile-time horizon cap |
+| `forecast_moirai_2`                   | Salesforce Moirai-2 — strong on clean seasonal data |
+| `forecast_toto_1`                     | Datadog Toto-1 — strong on noisy/observability series |
+| `forecast_sundial_base_128m`          | Tsinghua Sundial — generative, ICML 2025 Oral |
+| `forecast_ensemble`                   | Weighted mean across multiple models in parallel |
+| `list_models`                         | List available model slugs + their loaded/unloaded status |
+
+### Common args
+
+| Arg               | Type                | Description                                                        | Default            |
+| ----------------- | ------------------- | ------------------------------------------------------------------ | ------------------ |
+| `context`         | `list[list[float]]` | One inner list per series (single-series = `[[...]]`)              | _(required)_       |
+| `horizon`         | int                 | Steps into the future to forecast                                  | _(required)_       |
+| `quantile_levels` | `list[float]`       | Subset of `{0.1, 0.2, ..., 0.9}`                                   | `[0.1, 0.5, 0.9]`  |
+| `context_length`  | int                 | Max history points to feed the model (per-model defaults differ)   | per-model          |
+| `unload`          | bool                | Tear the model down after this call to free RAM/VRAM               | `false`            |
+
+`forecast_ensemble` additionally accepts a `weights: {slug: float}` map — weight `0` disables a model, omitted entries default to `1.0`.
+
+---
+
+## mailbox — IMAP+SMTP gateway (`MAILBOX=1`)
+
+MCP server backed by [docker-mailbox](https://github.com/psyb0t/docker-mailbox). Flat tool set across all configured accounts — every per-account tool takes a `mailbox` argument (name or address). Same bearer/HTTP wire shape, one MCP catalog regardless of how many inboxes are configured.
+
+See [services-reference.md](services-reference.md#mailbox-optional-mailbox1) for the full setup (config schema, credentials handling, host bind-mount).
+
+### Tools
+
+| Tool             | Description |
+| ---------------- | ----------- |
+| `mailboxes`      | List configured accounts + their IMAP/SMTP capabilities |
+| `inbox`          | Unified inbox across all accounts (or a filtered subset) |
+| `list_messages`  | List messages in a specific account/folder |
+| `get_message`    | Fetch a single message (headers + body; optional reader mode strips HTML) |
+| `search`         | Search a mailbox by header/body terms |
+| `send`           | Send a message via the account's SMTP |
+| `mark_seen`      | Flag messages as read |
+| `mark_unseen`    | Flag messages as unread |
+| `move`           | Move messages between folders |
+| `delete`         | Delete messages |
+
+### Common args
+
+| Arg          | Type                  | Description                                                          | Default       |
+| ------------ | --------------------- | -------------------------------------------------------------------- | ------------- |
+| `mailbox`    | `str` or `list[str]`  | Account name (from config) or address. List = multi-account scope    | _(required for per-account tools)_ |
+| `folder`    | `str`                 | IMAP folder name                                                     | `INBOX`       |
+| `limit`     | int                   | Max messages to return                                               | 50            |
+| `unseen`    | bool                  | Only unseen messages                                                 | `false`       |
+| `from`      | `str`                 | Filter by sender                                                     | —             |
+| `reader`    | bool                  | Strip HTML body to clean text/markdown (html2text)                   | `false`       |
+
+See the [docker-mailbox README](https://github.com/psyb0t/docker-mailbox) for the full per-tool parameter shape, including `send`'s `to`/`cc`/`bcc`/`subject`/`body`/`attachments` and bulk-update semantics.

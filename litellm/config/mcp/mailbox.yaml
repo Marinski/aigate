@@ -1,0 +1,6 @@
+mailbox:
+  url: "http://mailbox:8000/mcp"
+  transport: "http"
+  auth_type: "bearer_token"
+  auth_value: os.environ/MAILBOX_AUTH_TOKEN
+  description: "Email gateway over IMAP+SMTP across N configured mailboxes. Flat tool set with `mailbox` parameter (name or address): mailboxes, inbox (unified across all accounts), list_messages, get_message, search, mark_seen, mark_unseen, move, delete, send. One MCP for every account — no per-account namespacing."

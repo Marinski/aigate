@@ -482,6 +482,106 @@ Telegram client at `/telethon/`. Backed by [docker-telethon-plus](https://github
 
 ---
 
+## predictalot (optional, `PREDICTALOT=1` or `PREDICTALOT_CUDA=1`)
+
+Foundation time-series forecasting at `/predictalot/`. Backed by [docker-predictalot](https://github.com/psyb0t/docker-predictalot) — one HTTP endpoint, five univariate quantile forecasters (`chronos-2`, `timesfm-2.5`, `moirai-2`, `toto-1`, `sundial-base-128m`) behind an identical wire shape, plus an `/v1/forecast/ensemble` weighted-mean endpoint.
+
+Not registered with LiteLLM (no chat/completion surface) — it's accessed directly via nginx. MCP is exposed by default through LiteLLM's `/mcp/` aggregator with seven tools (`predictalot-forecast_chronos_2`, `predictalot-forecast_timesfm_2_5`, `predictalot-forecast_moirai_2`, `predictalot-forecast_toto_1`, `predictalot-forecast_sundial_base_128m`, `predictalot-forecast_ensemble`, `predictalot-list_models`).
+
+| Endpoint        | URL                                | Auth         |
+| --------------- | ---------------------------------- | ------------ |
+| List models     | `GET /predictalot/v1/models`       | Bearer token |
+| Single forecast | `POST /predictalot/v1/forecast`    | Bearer token |
+| Ensemble        | `POST /predictalot/v1/forecast/ensemble` | Bearer token |
+| MCP (direct)    | `/predictalot/mcp`                 | Bearer token |
+| MCP (aggregated)| `/mcp/` (via LiteLLM master key)   | Master key   |
+
+### Quick example
+
+```bash
+curl -s http://localhost:4000/predictalot/v1/forecast \
+  -H "Authorization: Bearer $PREDICTALOT_AUTH_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "chronos-2",
+    "context": [[10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]],
+    "config": {"horizon": 5}
+  }' | jq
+```
+
+Models lazy-load on first request (first call to a model downloads ~50-800MB into the mounted models dir, subsequent calls are fast). Idle models are unloaded after `PREDICTALOT_MODEL_IDLE_TIMEOUT` (default 30m).
+
+CPU and CUDA variants are mutually exclusive (both bind the `predictalot` network alias) — pick one. CUDA variant requires nvidia-container-toolkit + `--gpus` configuration on the host.
+
+### Environment variables
+
+| Variable                          | Default                            | Description                                                 |
+| --------------------------------- | ---------------------------------- | ----------------------------------------------------------- |
+| `PREDICTALOT_AUTH_TOKEN`          | `lulz-4-security-predictalot`      | Bearer token for `/predictalot/*` + MCP                     |
+| `PREDICTALOT_DEVICE`              | `auto`                             | `auto` / `cpu` / `cuda` / `cuda:N`                          |
+| `PREDICTALOT_PREFETCH`            | —                                  | Comma-separated slugs (or `all`) to fetch weights at boot   |
+| `PREDICTALOT_PRELOAD`             | —                                  | Comma-separated slugs to load into memory at boot           |
+| `PREDICTALOT_MODEL_IDLE_TIMEOUT`  | `30m`                              | Idle time before a loaded model is unloaded (Go-style)      |
+| `PREDICTALOT_MAX_BODY_SIZE`       | `32mb`                             | Max request body                                            |
+| `PREDICTALOT_LOG_LEVEL`           | `INFO`                             | Python log level                                            |
+| `DATA_DIR_PREDICTALOT`            | `${DATA_DIR}/predictalot`          | Where HF snapshots are stored (~1.4GB for all five models)  |
+| `RATELIMIT_PREDICTALOT`           | `60r/m`                            | Nginx rate limit                                            |
+| `RATELIMIT_PREDICTALOT_BURST`     | `20`                               | Burst allowance                                             |
+| `TIMEOUT_PREDICTALOT`             | `600s`                             | Nginx proxy timeout (cold model loads can be slow)          |
+| `PREDICTALOT_MEM_LIMIT`           | `6g` (CPU) / `12g` (CUDA)          | Container memory limit                                      |
+| `PREDICTALOT_CPUS`                | `4.0`                              | CPU limit                                                   |
+
+See [docker-predictalot README](https://github.com/psyb0t/docker-predictalot) for full per-model quirks, request/response shapes, and accuracy benchmarks.
+
+---
+
+## mailbox (optional, `MAILBOX=1`)
+
+Stateless IMAP+SMTP gateway at `/mailbox/`. Backed by [docker-mailbox](https://github.com/psyb0t/docker-mailbox) — point it at N email accounts via a single YAML config and out the other end you get one HTTP API + one MCP server (streamable-HTTP at `/mailbox/mcp`), both on the same bearer token. Unified inbox across all accounts, per-account CRUD, and SMTP send. No database; every read hits the upstream IMAP server live.
+
+Not registered with LiteLLM (no chat/completion surface). MCP is enabled by default via LiteLLM's `/mcp/` aggregator with a flat tool set (`mailbox-mailboxes`, `mailbox-inbox`, `mailbox-list_messages`, `mailbox-get_message`, `mailbox-search`, `mailbox-send`, `mailbox-mark_seen`, `mailbox-move`, `mailbox-delete`, …) — every per-account op takes `mailbox` as a parameter, so 100 inboxes ship the same handful of tools.
+
+| Endpoint        | URL                                  | Auth         |
+| --------------- | ------------------------------------ | ------------ |
+| Health          | `GET /mailbox/health`                | open         |
+| List mailboxes  | `GET /mailbox/mailboxes`             | Bearer token |
+| Unified inbox   | `GET /mailbox/inbox`                 | Bearer token |
+| Per-mailbox ops | `GET/POST/DELETE /mailbox/<name>/…`  | Bearer token |
+| Send            | `POST /mailbox/<name>/send`          | Bearer token |
+| MCP (direct)    | `/mailbox/mcp`                       | Bearer token |
+| MCP (aggregated)| `/mcp/` (via LiteLLM master key)     | Master key   |
+
+### Setup
+
+1. Copy `mailbox/config.example.yaml` to a host path **outside git history** (recommended: `.data/mailbox/config.yaml` — `.data/**` is gitignored).
+2. Fill in the IMAP/SMTP creds for each account.
+3. Put at least one bearer token in `auth.tokens:` and mirror it as `MAILBOX_AUTH_TOKEN` in `.env` (the MCP aggregator uses this to reach `/mailbox/mcp`).
+4. Set `MAILBOX_CONFIG` in `.env` to the absolute or repo-relative path of the YAML.
+5. `MAILBOX=1` in `.env`, then `make run-bg`.
+
+```bash
+curl -s http://localhost:4000/mailbox/mailboxes -H "Authorization: Bearer $MAILBOX_AUTH_TOKEN" | jq
+curl -s "http://localhost:4000/mailbox/inbox?limit=5" -H "Authorization: Bearer $MAILBOX_AUTH_TOKEN" | jq
+```
+
+The config file holds **plaintext IMAP/SMTP passwords + bearer tokens** — treat it like a private key. Never commit. `Makefile`'s `check_file_vars` validates `MAILBOX_CONFIG` resolves to an existing file before bringing the stack up.
+
+### Environment variables
+
+| Variable               | Default                  | Description                                                          |
+| ---------------------- | ------------------------ | -------------------------------------------------------------------- |
+| `MAILBOX_CONFIG`       | — (required)             | Host path to the mailbox YAML config                                 |
+| `MAILBOX_AUTH_TOKEN`   | `change-me-mailbox-auth` | Bearer token; MUST also appear in the YAML's `auth.tokens:`          |
+| `RATELIMIT_MAILBOX`    | `60r/m`                  | Nginx rate limit                                                     |
+| `RATELIMIT_MAILBOX_BURST` | `20`                  | Burst allowance                                                      |
+| `TIMEOUT_MAILBOX`      | `120s`                   | Nginx proxy timeout (IMAP fetches can be slow on large folders)      |
+| `MAILBOX_MEM_LIMIT`    | `256m`                   | Container memory limit                                               |
+| `MAILBOX_CPUS`         | `0.5`                    | CPU limit                                                            |
+
+See [docker-mailbox README](https://github.com/psyb0t/docker-mailbox) for the full config schema, query params (`mailbox=`, `unseen=`, `from=`, reader-mode HTML stripping, etc.), and the complete MCP tool list.
+
+---
+
 ## Cloudflared (optional, `CLOUDFLARED=1`)
 
 Disabled by default. Enable by setting `CLOUDFLARED=1` in `.env`.

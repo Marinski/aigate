@@ -1,0 +1,6 @@
+predictalot:
+  url: "http://predictalot:8080/mcp"
+  transport: "http"
+  auth_type: "bearer_token"
+  auth_value: os.environ/PREDICTALOT_AUTH_TOKEN
+  description: "Time-series forecasting via foundation models (chronos-2, timesfm-2.5, moirai-2, toto-1, sundial-base-128m). Tools: forecast_chronos_2, forecast_timesfm_2_5, forecast_moirai_2, forecast_toto_1, forecast_sundial_base_128m, forecast_ensemble (weighted multi-model), list_models. Univariate quantile forecasts; input = list of float series, output = median + per-quantile arrays."

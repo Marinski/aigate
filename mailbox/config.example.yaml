@@ -1,0 +1,59 @@
+# mailbox config — IMAP+SMTP accounts driven by docker-mailbox (psyb0t/mailbox).
+#
+# Copy this to a gitignored path (e.g. .data/mailbox/config.yaml) and point
+# MAILBOX_CONFIG in your .env at it. Holds plaintext IMAP/SMTP passwords and
+# the bearer tokens that gate the API — NEVER commit the populated file.
+#
+# Each mailbox declares any combination of:
+#   - imap: for reading / listing / deleting messages
+#   - smtp: for sending
+# At least one must be set. `name` is the URL-safe handle the HTTP API and
+# MCP tools refer to.
+
+log_level: INFO
+
+# Bearer-token auth — applies to ALL non-/health endpoints (HTTP API + the
+# /mcp streamable-HTTP transport). At least one token MUST also be set as
+# MAILBOX_AUTH_TOKEN in .env so the LiteLLM MCP aggregator can reach /mcp.
+auth:
+  tokens:
+    - "replace-with-a-long-random-token"
+    # - "second-token-for-rotation"
+
+mailboxes:
+  - name: personal
+    description: "My main Gmail account"
+
+    imap:
+      host: imap.gmail.com
+      port: 993
+      tls: ssl              # ssl | starttls | none   (default ssl)
+      username: me@gmail.com
+      password: "app-password-here"
+      default_folder: INBOX
+
+    smtp:
+      host: smtp.gmail.com
+      port: 465
+      tls: ssl              # ssl | starttls | none   (default starttls)
+      username: me@gmail.com
+      password: "app-password-here"
+      from_address: "Me <me@gmail.com>"
+
+  - name: work
+    description: "Work mailbox over IMAP+SMTP"
+
+    imap:
+      host: mail.example.com
+      port: 143
+      tls: starttls
+      username: me@example.com
+      password: "secret"
+
+    smtp:
+      host: mail.example.com
+      port: 587
+      tls: starttls
+      username: me@example.com
+      password: "secret"
+      from_address: me@example.com

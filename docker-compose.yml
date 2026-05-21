@@ -163,6 +163,82 @@ services:
       - aigate-internal
       - aigate-public
 
+  # predictalot (foundation time-series forecasters) — direct /predictalot/* route
+  # + MCP at /predictalot/mcp. Not registered with LiteLLM (no chat/completion surface).
+  predictalot:
+    profiles: ["predictalot"]
+    image: psyb0t/predictalot:v0.1.1
+    restart: unless-stopped
+    mem_limit: ${PREDICTALOT_MEM_LIMIT:-6g}
+    memswap_limit: ${PREDICTALOT_MEMSWAP_LIMIT:-12g}
+    cpus: ${PREDICTALOT_CPUS:-4.0}
+    environment:
+      PREDICTALOT_HOST: 0.0.0.0
+      PREDICTALOT_PORT: "8080"
+      PREDICTALOT_AUTH_TOKENS: ${PREDICTALOT_AUTH_TOKEN:-lulz-4-security-predictalot}
+      PREDICTALOT_DEVICE: ${PREDICTALOT_DEVICE:-auto}
+      PREDICTALOT_MODEL_DIR: /models
+      PREDICTALOT_PREFETCH: ${PREDICTALOT_PREFETCH:-}
+      PREDICTALOT_PRELOAD: ${PREDICTALOT_PRELOAD:-}
+      PREDICTALOT_MODEL_IDLE_TIMEOUT: ${PREDICTALOT_MODEL_IDLE_TIMEOUT:-30m}
+      PREDICTALOT_MAX_BODY_SIZE: ${PREDICTALOT_MAX_BODY_SIZE:-32mb}
+      PREDICTALOT_LOG_LEVEL: ${PREDICTALOT_LOG_LEVEL:-INFO}
+    volumes:
+      - ${DATA_DIR_PREDICTALOT:-${DATA_DIR:-.data}/predictalot}/models:/models
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/v1/models >/dev/null"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - aigate-internal
+      - aigate-public
+
+  # predictalot CUDA — GPU variant
+  predictalot-cuda:
+    profiles: ["predictalot-cuda"]
+    image: psyb0t/predictalot:v0.1.1-cuda
+    restart: unless-stopped
+    mem_limit: ${PREDICTALOT_CUDA_MEM_LIMIT:-12g}
+    memswap_limit: ${PREDICTALOT_CUDA_MEMSWAP_LIMIT:-24g}
+    cpus: ${PREDICTALOT_CUDA_CPUS:-4.0}
+    environment:
+      PREDICTALOT_HOST: 0.0.0.0
+      PREDICTALOT_PORT: "8080"
+      PREDICTALOT_AUTH_TOKENS: ${PREDICTALOT_AUTH_TOKEN:-lulz-4-security-predictalot}
+      PREDICTALOT_DEVICE: ${PREDICTALOT_DEVICE:-auto}
+      PREDICTALOT_MODEL_DIR: /models
+      PREDICTALOT_PREFETCH: ${PREDICTALOT_PREFETCH:-}
+      PREDICTALOT_PRELOAD: ${PREDICTALOT_PRELOAD:-}
+      PREDICTALOT_MODEL_IDLE_TIMEOUT: ${PREDICTALOT_MODEL_IDLE_TIMEOUT:-30m}
+      PREDICTALOT_MAX_BODY_SIZE: ${PREDICTALOT_MAX_BODY_SIZE:-32mb}
+      PREDICTALOT_LOG_LEVEL: ${PREDICTALOT_LOG_LEVEL:-INFO}
+    volumes:
+      - ${DATA_DIR_PREDICTALOT:-${DATA_DIR:-.data}/predictalot}/models:/models
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/v1/models >/dev/null"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      aigate-internal:
+        aliases: [predictalot]
+      aigate-public:
+        aliases: [predictalot]
+
   hybrids3:
     profiles: ["hybrids3"]
     image: psyb0t/hybrids3:v0.1.0
@@ -849,6 +925,37 @@ services:
       - aigate-internal
       - aigate-public
 
+  # mailbox — stateless IMAP+SMTP gateway. Config file holds plaintext creds +
+  # bearer tokens, so MAILBOX_CONFIG must point at a gitignored YAML on the host.
+  mailbox:
+    profiles: ["mailbox"]
+    image: psyb0t/mailbox:v0.3.0
+    restart: unless-stopped
+    mem_limit: ${MAILBOX_MEM_LIMIT:-256m}
+    memswap_limit: ${MAILBOX_MEMSWAP_LIMIT:-512m}
+    cpus: ${MAILBOX_CPUS:-0.5}
+    environment:
+      MAILBOXD_CONFIG: /etc/mailboxd/config.yaml
+    volumes:
+      - ${MAILBOX_CONFIG:-/dev/null}:/etc/mailboxd/config.yaml:ro
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - aigate-internal
+      - aigate-public
+
   searxng:
     profiles: ["searxng"]
     image: searxng/searxng:2026.4.24-a7ac696b4
@@ -979,6 +1086,22 @@ configs:
               proxy_cache off;
           }
 
+          # predictalot — time-series forecasting (direct route, not via LiteLLM)
+          location /predictalot/ {
+              limit_req zone=predictalot burst=${RATELIMIT_PREDICTALOT_BURST:-20} nodelay;
+              set $$upstream_predictalot http://predictalot:8080;
+              rewrite ^/predictalot/(.*) /$$1 break;
+              proxy_pass $$upstream_predictalot;
+              proxy_set_header Host $$http_host;
+              proxy_set_header X-Real-IP $$remote_addr;
+              proxy_set_header X-Forwarded-For $$proxy_add_x_forwarded_for;
+              proxy_set_header X-Forwarded-Proto $$scheme;
+              proxy_read_timeout ${TIMEOUT_PREDICTALOT:-600s};
+              proxy_send_timeout ${TIMEOUT_PREDICTALOT:-600s};
+              proxy_buffering off;
+              proxy_cache off;
+          }
+
           # stealthy-auto-browse cluster — HAProxy → browser replicas
           location /stealthy-auto-browse/ {
               limit_req zone=browser burst=${RATELIMIT_BROWSER_BURST:-10} nodelay;
@@ -1059,6 +1182,22 @@ configs:
               proxy_cache off;
           }
 
+
+          # mailbox — IMAP+SMTP gateway REST API + MCP
+          location /mailbox/ {
+              limit_req zone=mailbox burst=${RATELIMIT_MAILBOX_BURST:-20} nodelay;
+              set $$upstream_mailbox http://mailbox:8000;
+              rewrite ^/mailbox/(.*) /$$1 break;
+              proxy_pass $$upstream_mailbox;
+              proxy_set_header Host $$http_host;
+              proxy_set_header X-Real-IP $$remote_addr;
+              proxy_set_header X-Forwarded-For $$proxy_add_x_forwarded_for;
+              proxy_set_header X-Forwarded-Proto $$scheme;
+              proxy_read_timeout ${TIMEOUT_MAILBOX:-120s};
+              proxy_send_timeout ${TIMEOUT_MAILBOX:-120s};
+              proxy_buffering off;
+              proxy_cache off;
+          }
 
           # Telethon — Telegram client REST API + MCP
           location /telethon/ {
@@ -1172,6 +1311,8 @@ configs:
       limit_req_zone $$binary_remote_addr zone=librechat:10m rate=${RATELIMIT_LIBRECHAT:-500r/m};
       limit_req_zone $$binary_remote_addr zone=searxng:10m rate=${RATELIMIT_SEARXNG:-60r/m};
       limit_req_zone $$binary_remote_addr zone=telethon:10m rate=${RATELIMIT_TELETHON:-30r/m};
+      limit_req_zone $$binary_remote_addr zone=predictalot:10m rate=${RATELIMIT_PREDICTALOT:-60r/m};
+      limit_req_zone $$binary_remote_addr zone=mailbox:10m rate=${RATELIMIT_MAILBOX:-60r/m};
 
   proxq_config:
     content: |

@@ -41,5 +41,7 @@ litellm/config.yaml
 !.data/speaches/.gitkeep
 !.data/tailscale/
 !.data/tailscale/.gitkeep
+!.data/mailbox/
+!.data/mailbox/.gitkeep
 
 ANUSTIMES.md
