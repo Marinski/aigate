@@ -951,7 +951,8 @@ configs:
           location /claudebox/ {
               limit_req zone=claudebox burst=${RATELIMIT_CLAUDEBOX_BURST:-10} nodelay;
               set $$upstream_claudebox http://claudebox:8080;
-              proxy_pass $$upstream_claudebox/;
+              rewrite ^/claudebox/(.*) /$$1 break;
+              proxy_pass $$upstream_claudebox;
               proxy_set_header Host localhost:8080;
               proxy_set_header X-Real-IP $$remote_addr;
               proxy_set_header X-Forwarded-For $$proxy_add_x_forwarded_for;
@@ -966,7 +967,8 @@ configs:
           location /claudebox-zai/ {
               limit_req zone=claudebox burst=${RATELIMIT_CLAUDEBOX_BURST:-10} nodelay;
               set $$upstream_claudebox_zai http://claudebox-zai:8080;
-              proxy_pass $$upstream_claudebox_zai/;
+              rewrite ^/claudebox-zai/(.*) /$$1 break;
+              proxy_pass $$upstream_claudebox_zai;
               proxy_set_header Host localhost:8080;
               proxy_set_header X-Real-IP $$remote_addr;
               proxy_set_header X-Forwarded-For $$proxy_add_x_forwarded_for;
@@ -981,7 +983,8 @@ configs:
           location /stealthy-auto-browse/ {
               limit_req zone=browser burst=${RATELIMIT_BROWSER_BURST:-10} nodelay;
               set $$upstream_browser http://stealthy-auto-browse-proxy:8080;
-              proxy_pass $$upstream_browser/;
+              rewrite ^/stealthy-auto-browse/(.*) /$$1 break;
+              proxy_pass $$upstream_browser;
               proxy_set_header Host $$http_host;
               proxy_set_header X-Real-IP $$remote_addr;
               proxy_set_header X-Forwarded-For $$proxy_add_x_forwarded_for;
@@ -1023,7 +1026,8 @@ configs:
           location /librechat/ {
               limit_req zone=librechat burst=${RATELIMIT_LIBRECHAT_BURST:-100} nodelay;
               set $$upstream_librechat http://librechat:3080;
-              proxy_pass $$upstream_librechat/;
+              rewrite ^/librechat/(.*) /$$1 break;
+              proxy_pass $$upstream_librechat;
               proxy_set_header Host $$http_host;
               proxy_set_header X-Real-IP $$remote_addr;
               proxy_set_header X-Forwarded-For $$proxy_add_x_forwarded_for;
@@ -1043,7 +1047,8 @@ configs:
               limit_req zone=searxng burst=${RATELIMIT_SEARXNG_BURST:-20} nodelay;
               include /etc/nginx/auth/auth.conf;
               set $$upstream_searxng http://searxng:8080;
-              proxy_pass $$upstream_searxng/;
+              rewrite ^/searxng/(.*) /$$1 break;
+              proxy_pass $$upstream_searxng;
               proxy_set_header Host $$http_host;
               proxy_set_header X-Real-IP $$remote_addr;
               proxy_set_header X-Forwarded-For $$proxy_add_x_forwarded_for;
