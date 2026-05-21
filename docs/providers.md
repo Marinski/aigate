@@ -2,9 +2,39 @@
 
 Providers are configured via YAML fragments in `litellm/config/providers/`. `make run` assembles them into `litellm/config.yaml` (auto-generated, gitignored). Free-tier providers are tried first in fallback chains. Each provider is opt-in: set its flag to `1` in `.env` (e.g. `GROQ=1`) and fill in the API key. The flag activates the provider — the key alone does nothing.
 
-## Groq (free tier)
+## Free-tier reality check
 
-Sign up: [console.groq.com](https://console.groq.com) — no credit card required.
+"Free" never means unlimited. Every cloud provider on this gateway has a hard cap somewhere — RPM, RPD, TPM, TPD, monthly tokens, monthly request count, or a tiny dollar-denominated credit. Cross the cap and you get 429s, blocked accounts, or pay-as-you-go billing. The fallback chains in `litellm/config/fallbacks.json` hop to the next provider on 429, but if you've exhausted all of them you're either falling all the way to local models or getting an error.
+
+Numbers below were correct at last check (provider docs change — click through for current values before relying on a tier).
+
+| Provider     | CC required? | Per-minute            | Per-day                              | Monthly cap                          | Notes                                                                                | Official limits page                                                                                                  |
+| ------------ | ------------ | --------------------- | ------------------------------------ | ------------------------------------ | ------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------- |
+| Groq         | No           | 30 RPM, 6–12K TPM     | 1K–14.4K RPD, 100K–500K TPD          | —                                    | Per-model. `llama-3.3-70b`: 1K RPD / 100K TPD. `llama-3.1-8b`: 14.4K RPD / 500K TPD. | [console.groq.com/docs/rate-limits](https://console.groq.com/docs/rate-limits)                                        |
+| Cerebras     | No           | 5 RPM, 30K TPM        | 1M TPH, 1M TPD                       | —                                    | "Free Trial" eligible models only: `qwen-3-235b`, `gpt-oss-120b`, `zai-glm-4.7`, `llama3.1-8b`. | [inference-docs.cerebras.ai/support/rate-limits](https://inference-docs.cerebras.ai/support/rate-limits)                |
+| OpenRouter   | No (for $0)  | 20 RPM on `:free`     | 50 RPD with $0 / 1000 RPD with $10+  | —                                    | Daily cap is per-account, not per-model.                                             | [openrouter.ai/docs/api-reference/limits](https://openrouter.ai/docs/api-reference/limits)                            |
+| HuggingFace  | No           | varies per provider   | varies per provider                  | **$0.10 credits/mo** (PRO: $2/mo)    | Once credits run out you must purchase more — there is no "stays free forever" tier. | [huggingface.co/docs/inference-providers/pricing](https://huggingface.co/docs/inference-providers/pricing)            |
+| Mistral      | No           | not published         | not published                        | not published                        | "Experiment" plan exists but Mistral doesn't publish numeric limits — see Admin → Limits in console after sign-up. Only `mistral-large`, `mistral-small`, `ministral-8b`, `mistral-embed` are free-tier. | [docs.mistral.ai/admin/user-management-finops/tier](https://docs.mistral.ai/admin/user-management-finops/tier)         |
+| Cohere       | No           | 20 RPM chat, 10 RPM rerank, 2K inputs/min embed | —                          | **1,000 API calls/month** (chat)     | Hard monthly request cap is very low — runs out fast on any real workload.            | [docs.cohere.com/v2/docs/rate-limits](https://docs.cohere.com/v2/docs/rate-limits)                                     |
+| Claudebox    | Subscription | depends on plan       | depends on plan                      | —                                    | Uses your Claude Pro/Max OAuth — no extra cost beyond the sub.                       | [anthropic.com/pricing](https://www.anthropic.com/pricing)                                                            |
+| Claudebox-zai| Subscription | depends on plan       | depends on plan                      | —                                    | Uses your z.ai subscription.                                                          | [z.ai](https://z.ai)                                                                                                  |
+| Anthropic    | **Yes**      | tiered                | tiered                               | pay-per-token, no free tier          | Not free. Standard API.                                                              | [docs.anthropic.com/en/api/rate-limits](https://docs.anthropic.com/en/api/rate-limits)                                |
+| OpenAI       | **Yes**      | tiered                | tiered                               | pay-per-token, no free tier          | Not free. Standard API.                                                              | [platform.openai.com/docs/guides/rate-limits](https://platform.openai.com/docs/guides/rate-limits)                    |
+| Local (CPU / CUDA) | N/A    | unlimited             | unlimited                            | unlimited                            | Only constrained by your hardware. Last-resort fallback when all cloud tiers fail.   | —                                                                                                                     |
+
+What this means for the gateway:
+
+- **Hammer Groq → 429 → fallback** chain hops. A single requesting client doing >30 chat completions/minute is hitting Groq's RPM ceiling, not yours.
+- **Cohere is a footgun**: 1,000 calls/month at trial is enough for testing, not enough for any real workload. Don't put Cohere first in a custom fallback chain unless you've enabled production billing.
+- **HuggingFace free is ~$0.10/month** — designed for evaluation, not production. Use a custom provider key (your own HF Pro / direct Together / Fireworks / etc.) for sustained use.
+- **OpenRouter $0 → 50 req/day total** across all `:free` models. Bumping to $10 loaded raises it to 1000 RPD.
+- **Cerebras free tier is brutally rate-capped**: 5 RPM (not per-second, not per-day — per **minute**) is the bottleneck long before the 1M TPD budget. And it's only 4 models — anything else needs the paid Developer plan.
+- **Mistral doesn't publish free-tier numbers anywhere** — the "Experiment" plan exists but exact RPS/TPM/TPMonth values live only in your account's Admin → Limits page. Plan accordingly, treat it as low-volume eval-only until you've seen your numbers.
+- **Local models** are the only true "no limit" — at the cost of your own VRAM / CPU / latency.
+
+## Groq (free tier — 30 RPM, 1K–14.4K RPD per model, no CC)
+
+Sign up: [console.groq.com](https://console.groq.com) — no credit card required. Per-model limits at [console.groq.com/docs/rate-limits](https://console.groq.com/docs/rate-limits).
 
 | Model                          | Alias                               | Notes           |
 | ------------------------------ | ----------------------------------- | --------------- |
@@ -20,20 +50,20 @@ Sign up: [console.groq.com](https://console.groq.com) — no credit card require
 | whisper-large-v3               | `groq-whisper-large-v3`             | transcription   |
 | whisper-large-v3-turbo         | `groq-whisper-large-v3-turbo`       | transcription, fast |
 
-## Cerebras (free tier)
+## Cerebras (free tier — 5 RPM / 30K TPM / 1M TPD, no CC)
 
-Sign up: [cloud.cerebras.ai](https://cloud.cerebras.ai) — 1M tokens/day free, no credit card required. Among the fastest inference available (Llama 3.1 8B ~1,800 t/s, Qwen3 235B ~1,400 t/s).
+Sign up: [cloud.cerebras.ai](https://cloud.cerebras.ai) — no credit card required. The "Free Trial" plan covers **4 models only** (`qwen-3-235b`, `gpt-oss-120b`, `zai-glm-4.7`, `llama3.1-8b`) and is capped at **5 requests per minute / 30K tokens per minute / 1M tokens per hour / 1M tokens per day** per model. Token bucketing — quota replenishes continuously, not on a fixed reset. The 5 RPM ceiling burns out long before the 1M TPD budget on any real workload. Limits page: [inference-docs.cerebras.ai/support/rate-limits](https://inference-docs.cerebras.ai/support/rate-limits). Among the fastest inference available (Llama 3.1 8B ~1,800 t/s, Qwen3 235B ~1,400 t/s).
 
 | Model                          | Alias                    | Notes                         |
 | ------------------------------ | ------------------------ | ----------------------------- |
-| qwen-3-235b-a22b-instruct-2507 | `cerebras-qwen3-235b`    | flagship, very fast           |
-| gpt-oss-120b                   | `cerebras-gpt-oss-120b`  | rate-limited on free tier     |
-| zai-glm-4.7                    | `cerebras-glm-4.7`       | rate-limited on free tier     |
-| llama3.1-8b                    | `cerebras-llama-3.1-8b`  | fastest option on this tier   |
+| qwen-3-235b-a22b-instruct-2507 | `cerebras-qwen3-235b`    | flagship, very fast — free-tier eligible |
+| gpt-oss-120b                   | `cerebras-gpt-oss-120b`  | free-tier eligible            |
+| zai-glm-4.7                    | `cerebras-glm-4.7`       | free-tier eligible            |
+| llama3.1-8b                    | `cerebras-llama-3.1-8b`  | fastest, free-tier eligible   |
 
-## OpenRouter (free tier)
+## OpenRouter (free tier — 50 RPD at $0, 1000 RPD at $10+)
 
-Sign up: [openrouter.ai](https://openrouter.ai) — 50 req/day free (no credits), 1000 req/day with $10+ loaded.
+Sign up: [openrouter.ai](https://openrouter.ai) — 50 req/day free across all `:free` models with $0 loaded; 1000 req/day once you've loaded ≥$10 in credits (lifetime, not monthly). Limits page: [openrouter.ai/docs/api-reference/limits](https://openrouter.ai/docs/api-reference/limits).
 
 | Model                                | Alias              |
 | ------------------------------------ | ------------------ |
@@ -46,9 +76,9 @@ Sign up: [openrouter.ai](https://openrouter.ai) — 50 req/day free (no credits)
 | openai/gpt-oss-120b                  | `or-gpt-oss-120b`  |
 | openai/gpt-oss-20b                   | `or-gpt-oss-20b`   |
 
-## HuggingFace Inference Providers (free tier)
+## HuggingFace Inference Providers ($0.10/mo free credits — not really "free")
 
-Sign up: [huggingface.co](https://huggingface.co/settings/tokens) — free tier with rate limits per provider.
+Sign up: [huggingface.co](https://huggingface.co/settings/tokens). Free users get **$0.10 in credits per month** (PRO: $2/mo, Team/Enterprise: $2/seat/mo). Past that you're pay-as-you-go at the provider's rate — HF doesn't mark up. Treat this as a "try before you buy" tier, not sustained free inference. Pricing: [huggingface.co/docs/inference-providers/pricing](https://huggingface.co/docs/inference-providers/pricing).
 
 | Model                                        | Alias                  | Notes          |
 | -------------------------------------------- | ---------------------- | -------------- |
@@ -63,9 +93,11 @@ Sign up: [huggingface.co](https://huggingface.co/settings/tokens) — free tier 
 | google/gemma-3-12b-it                        | `hf-gemma-3-12b`       | multimodal     |
 | black-forest-labs/FLUX.1-schnell             | `hf-flux-schnell`      | image gen, fast |
 
-## Mistral AI (free tier: 1B tokens/month, 60 RPM)
+## Mistral AI (free "Experiment" tier — exact limits not published, no CC)
 
-Sign up: [console.mistral.ai](https://console.mistral.ai) — no credit card required for free models.
+Sign up: [console.mistral.ai](https://console.mistral.ai) — no credit card required to start. Mistral has a free **"Experiment" plan** ("intended for evaluation and prototyping only") and a paid **"Scale" plan** (pay-as-you-go, auto-promoted Tier 1 → Tier 4 by cumulative billing). The free plan covers `mistral-large`, `mistral-small`, `ministral-8b`, and `mistral-embed`. Anything else (magistral, devstral, codestral, voxtral) requires Scale plan.
+
+**Mistral does not publish numeric free-tier RPS/TPM/TPMonth values anywhere on their public docs site.** The official tier page ([docs.mistral.ai/admin/user-management-finops/tier](https://docs.mistral.ai/admin/user-management-finops/tier)) explicitly directs you to "Admin → Limits" inside your own console to see exact numbers. Treat the free tier as low-volume eval until you've signed in and checked yours.
 
 | Model                 | Alias              | Tier | Notes              |
 | --------------------- | ------------------ | ---- | ------------------ |
@@ -79,9 +111,9 @@ Sign up: [console.mistral.ai](https://console.mistral.ai) — no credit card req
 | mistral-embed         | `mistral-embed`    | free | embeddings         |
 | voxtral-small-25-07   | `voxtral-small`    | -    | audio transcription |
 
-## Cohere (trial: 1K req/day, 20 RPM — all models included)
+## Cohere (trial — 20 RPM chat, **1K calls/month total cap**, no CC)
 
-Sign up: [dashboard.cohere.com](https://dashboard.cohere.com) — no credit card required. Trial key gives access to all models.
+Sign up: [dashboard.cohere.com](https://dashboard.cohere.com) — no credit card required. Trial key gives access to all models, but **the monthly chat cap is only 1,000 API calls** — runs out fast on any real workload. Rerank: 10 RPM. Embed: 2,000 inputs/min (text) or 5 inputs/min (images). Limits page: [docs.cohere.com/v2/docs/rate-limits](https://docs.cohere.com/v2/docs/rate-limits). For production, switch to a production key (500 RPM chat, contact sales).
 
 | Model                  | Alias                   | Notes                        |
 | ---------------------- | ----------------------- | ---------------------------- |

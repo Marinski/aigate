@@ -6,7 +6,7 @@ Everything an AI-powered workflow needs — inference, tool use, browser automat
 
 ### Models and routing
 
-Models across multiple providers. Six providers are completely free (Groq, Cerebras, OpenRouter, HuggingFace, Mistral, Cohere). Five run locally on your own hardware — CPU or NVIDIA GPU — with no network calls, no rate limits, and no usage costs (Ollama, Speaches, Qwen3 TTS, stable-diffusion.cpp CPU, stable-diffusion.cpp CUDA). The gateway burns through providers in priority order and falls back automatically when one rate-limits or fails, so you're never paying for tokens you could have gotten free.
+Models across multiple providers. Six providers offer free tiers (Groq, Cerebras, OpenRouter, HuggingFace, Mistral, Cohere) — **but "free" means rate-limited and capped**, not unlimited. See [free-tier reality check](docs/providers.md#free-tier-reality-check) for exact RPM/RPD/monthly caps before relying on a tier. Five providers run locally on your own hardware — CPU or NVIDIA GPU — with no network calls, no rate limits, and no usage costs (Ollama, Speaches, Qwen3 TTS, stable-diffusion.cpp CPU, stable-diffusion.cpp CUDA). The gateway burns through providers in priority order and falls back automatically when one rate-limits or fails, so you're never paying for tokens you could have gotten free.
 
 ### Tools and capabilities
 
@@ -57,12 +57,12 @@ nginx :4000                                          ┌────────
   ├─► /searxng/              → SearXNG (meta-search, SEARXNG=1)
   ├─► /telethon/             → Telethon (Telegram client, TELETHON=1)
   └─► /                      → LiteLLM (sync)
-                                  ├─ Groq               (free, GROQ=1)
-                                  ├─ Cerebras           (free, CEREBRAS=1)
-                                  ├─ OpenRouter         (free tier, OPENROUTER=1)
-                                  ├─ HuggingFace        (free, HUGGINGFACE=1)
-                                  ├─ Mistral            (free: 1B tokens/month, MISTRAL=1)
-                                  ├─ Cohere             (free: 1K req/day, COHERE=1)
+                                  ├─ Groq               (free: 30 RPM, 1K-14.4K RPD per model, GROQ=1)
+                                  ├─ Cerebras           (free: 5 RPM / 30K TPM / 1M TPD, 4 models only, CEREBRAS=1)
+                                  ├─ OpenRouter         (free: 50 RPD $0 / 1K RPD with $10+, OPENROUTER=1)
+                                  ├─ HuggingFace        (free: $0.10/mo credits — eval only, HUGGINGFACE=1)
+                                  ├─ Mistral            (free "Experiment" tier — exact limits not published, MISTRAL=1)
+                                  ├─ Cohere             (trial: 1K calls/MONTH — runs out fast, COHERE=1)
                                   ├─ Ollama CPU         (local, OLLAMA=1)
                                   ├─ Ollama CUDA        (local, NVIDIA, OLLAMA_CUDA=1)
                                   ├─ Speaches CPU       (local, transcription + TTS, SPEACHES=1)
@@ -156,16 +156,16 @@ Tools across optional servers. Any model that supports function calling can invo
 
 ## Providers and Models
 
-Models across multiple providers. Six are free tier with no credit card required. Five run locally on your own hardware — CPU or NVIDIA GPU — with no rate limits. Per-model fallback chains route automatically through alternative providers when one fails or rate-limits.
+Models across multiple providers. Six offer free tiers with no credit card required — but every "free" tier has a hard cap (RPM, RPD, monthly tokens, or monthly request count). Read [free-tier reality check](docs/providers.md#free-tier-reality-check) for exact numbers. Five providers run locally on your own hardware — CPU or NVIDIA GPU — with no rate limits. Per-model fallback chains route automatically through alternative providers when one fails or rate-limits.
 
 ### Routing philosophy
 
-| Priority    | Tier             | Providers                                                |
-| ----------- | ---------------- | -------------------------------------------------------- |
-| 1st         | Free cloud       | Groq, Cerebras, OpenRouter, HuggingFace, Mistral, Cohere |
-| 2nd         | Flat-rate        | claudebox (Max sub), claudebox-zai (z.ai)                |
-| 3rd         | Pay-per-token    | Anthropic, OpenAI                                        |
-| Last resort | Local (CPU/CUDA) | Ollama, Speaches, Qwen3 CUDA TTS, sd.cpp                 |
+| Priority    | Tier             | Providers                                                | Reality                                                                                   |
+| ----------- | ---------------- | -------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| 1st         | Free cloud       | Groq, Cerebras, OpenRouter, HuggingFace, Mistral, Cohere | Capped — see [free-tier reality check](docs/providers.md#free-tier-reality-check)         |
+| 2nd         | Flat-rate        | claudebox (Max sub), claudebox-zai (z.ai)                | Costs the subscription, no extra per-call                                                 |
+| 3rd         | Pay-per-token    | Anthropic, OpenAI                                        | Real money per token — last resort before going local                                     |
+| Last resort | Local (CPU/CUDA) | Ollama, Speaches, Qwen3 CUDA TTS, sd.cpp                 | No external limits — bounded only by your hardware                                        |
 
 ### Fallback chains
 
@@ -340,12 +340,12 @@ Everything is opt-in via flags in `.env`. API keys are stored separately and nev
 | `ANTHROPIC=1`     | Direct Anthropic API models                                                               |
 | `CLAUDEBOX=1`     | claudebox service + models + MCP server (Claude Code via OAuth or API key)                |
 | `CLAUDEBOX_ZAI=1` | claudebox-zai service + GLM models + MCP server (via z.ai)                                |
-| `CEREBRAS=1`      | Cerebras models (free tier)                                                               |
-| `OPENROUTER=1`    | OpenRouter models (free tier)                                                             |
-| `HUGGINGFACE=1`   | HuggingFace models (free tier)                                                            |
-| `MISTRAL=1`       | Mistral AI models (free: 1B tokens/month)                                                 |
-| `COHERE=1`        | Cohere models (free: 1K req/day)                                                          |
-| `GROQ=1`          | Groq models (free tier)                                                                   |
+| `CEREBRAS=1`      | Cerebras models (free: 5 RPM / 30K TPM / 1M TPD, 4 models only — see [limits](docs/providers.md#free-tier-reality-check)) |
+| `OPENROUTER=1`    | OpenRouter models (free: 50 RPD at $0, 1K RPD at $10+ credits — see [limits](docs/providers.md#free-tier-reality-check)) |
+| `HUGGINGFACE=1`   | HuggingFace models (free: **$0.10/mo credits only**, eval tier — see [limits](docs/providers.md#free-tier-reality-check)) |
+| `MISTRAL=1`       | Mistral AI models (free "Experiment" tier — exact limits not published, see your Admin dashboard) |
+| `COHERE=1`        | Cohere models (trial: **1K calls/MONTH total cap** — see [limits](docs/providers.md#free-tier-reality-check)) |
+| `GROQ=1`          | Groq models (free: 30 RPM, 1K-14.4K RPD per model — see [limits](docs/providers.md#free-tier-reality-check)) |
 | `OLLAMA=1`        | Local Ollama CPU inference (~6GB+ RAM)                                                    |
 | `OLLAMA_CUDA=1`   | Local Ollama NVIDIA GPU inference (requires `nvidia-container-toolkit`)                   |
 | `SPEACHES=1`      | Local Speaches CPU transcription/TTS (~4GB RAM)                                           |
@@ -402,7 +402,7 @@ On first start, Ollama will pull all local models in the background. Speaches mo
 ## Usage
 
 ```bash
-# cloud provider (free tier, auto-fallback on rate limit)
+# cloud provider (free tier — capped, see docs/providers.md#free-tier-reality-check; auto-fallback on 429)
 curl http://localhost:4000/chat/completions \
   -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
   -H "Content-Type: application/json" \
@@ -577,7 +577,7 @@ Ollama and Speaches log to stdout by default — visible in `docker compose logs
 
 **Slow local inference** — expected if the resource manager just swapped models. The first request after a swap includes model load time (seconds for Ollama, up to minutes for sd.cpp FLUX on CPU). Subsequent requests are fast until the idle timeout unloads the model. Increase idle timeouts to keep models warm longer.
 
-**Rate limited on every provider** — all free tiers have limits. Groq: ~30 req/min. Cerebras: ~30 req/min. HuggingFace: varies. If you're hitting all of them, the fallback chain will eventually land on a paid provider or local model. Check `docker compose logs litellm | grep fallback` to see the chain in action. Consider enabling more free providers to spread the load.
+**Rate limited on every provider** — all free tiers have hard caps. Quick reference: Groq 30 RPM + 1K-14.4K RPD per model, Cerebras **5 RPM / 30K TPM / 1M TPD on 4 models only**, OpenRouter 20 RPM on `:free` + 50 RPD ($0) or 1K RPD ($10+ credits), Mistral free "Experiment" tier (exact numbers not published — check your dashboard), Cohere 20 RPM chat with a **1K calls/month total cap**, HuggingFace **$0.10/mo credits** (eval only). Full table with official limit pages: [free-tier reality check](docs/providers.md#free-tier-reality-check). If you're hitting all of them at once, the fallback chain lands on flat-rate (claudebox), then pay-per-token (Anthropic/OpenAI), then local. Check `docker compose logs litellm | grep fallback` to see the chain in action. Consider enabling more free providers, or going local (`OLLAMA=1` / `OLLAMA_CUDA=1`) for unlimited.
 
 **Tests failing** — make sure the stack is running (`make run-bg`) and healthy (`docker compose ps`). Tests require the services they're testing to be enabled — `OLLAMA_CUDA=1` for Ollama CUDA tests, `SDCPP_CUDA=1` for sd.cpp CUDA tests, etc. Run `bash test.sh --help` to see which tests are available and their requirements.
 
