@@ -23,6 +23,9 @@ bash test.sh --help
 - **MCP** — all tools loaded across servers, per-server tool counts, specific tool presence, authentication
 - **MCP Media** — image generation tool (via mcp_tools-generate_image), TTS tool (via mcp_tools-generate_tts), tool presence based on enabled providers, invalid model error handling, tool descriptions contain expected model names, sdcpp-cuda image generation through MCP, e2e LLM tool calling (qwen3-8b → tool_call → MCP generate_image → sdcpp-cuda → upload → LLM responds with link)
 - **sd.cpp** _(SDCPP=1)_ — wrapper health, model listing, status fields, load/unload/double-load/double-unload, auto-load on generate, image generation, model swap (sd-turbo ↔ sdxl-turbo), cleanup unload. Both CPU and CUDA variants.
+- **predictalot** _(PREDICTALOT=1 / PREDICTALOT_CUDA=1)_ — `/v1/models` listing, bearer auth enforcement, single-model forecast (chronos-2), unknown-model 404, MCP tool surface
+- **mailbox** _(MAILBOX=1)_ — open `/health`, auth enforcement on non-health endpoints, `/mailboxes` returns at least one configured account, MCP tool surface. Optional e2e (gated on `MAILBOX_TEST_MAILBOX_NAME` + `MAILBOX_TEST_ADDRESS`): send → poll IMAP → read → delete → verify gone.
+- **telethon** _(TELETHON=1)_ — `get_me` returns own profile (verifies the string session is authorized), MCP tool surface
 - **HybridS3** — full CRUD lifecycle (upload, download, list, delete, verify deletion), public read without auth, write rejection without auth, presigned URL generation and download
 - **Browser** — page navigation, interactive element detection, screenshot capture, full automation flow (navigate, find elements, click, type, screenshot)
 - **Claudebox** — chat completion via LiteLLM, direct API access via nginx, file operations (upload, download, list, delete), z.ai instance reachability, OpenAI-compatible models endpoint (both instances)

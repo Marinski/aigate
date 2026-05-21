@@ -2,7 +2,7 @@
 
 A self-hosted AI platform. One `docker-compose up`.
 
-Everything an AI-powered workflow needs — inference, tool use, browser automation, image generation, speech synthesis, transcription, object storage, agentic code execution, an async job queue, and a web UI — behind a single OpenAI-compatible endpoint at `http://localhost:4000`. Point any existing client at it and it works.
+Everything an AI-powered workflow needs — inference, tool use, browser automation, image generation, speech synthesis, transcription, object storage, agentic code execution, web search, an email gateway, a Telegram client, time-series forecasting, an async job queue, and a web UI — behind a single OpenAI-compatible endpoint at `http://localhost:4000`. Point any existing client at it and it works.
 
 ### Models and routing
 
@@ -15,10 +15,13 @@ MCP tools across multiple servers. Any model with function calling can invoke th
 - **Stealth browser cluster** — 5 Camoufox replicas behind HAProxy, real OS-level mouse and keyboard input, zero CDP exposure. Passes Cloudflare, CreepJS, BrowserScan, and every other bot detector we've thrown at it.
 - **Two agentic coding agents** — full shell access, persistent workspaces, file I/O, tool use. Claude Code (your subscription or API key) and pi-coding-agent pointed at z.ai for GLM models. Both expose REST API, OpenAI-compatible endpoint, and MCP server.
 - **Object storage** — S3-compatible, public-read uploads, presigned URLs, auto-expiry. Plain HTTP and boto3.
-- **Image generation** — FLUX, DALL-E, Stable Diffusion (cloud + local CPU/CUDA via stable-diffusion.cpp) via MCP tools that return persistent URLs, not base64 blobs. Local models: sd-turbo, sdxl-turbo, sdxl-lightning, flux-schnell, juggernaut-xi.
+- **Image generation** — FLUX, DALL-E, Stable Diffusion (cloud + local CPU/CUDA via stable-diffusion.cpp) via MCP tools that return persistent URLs, not base64 blobs. Local CPU: sd-turbo, sdxl-turbo. Local CUDA adds: sdxl-lightning, flux-schnell, juggernaut-xi.
 - **Text-to-speech** — Kokoro (CPU, English+Chinese, voice presets), Piper (CPU, 17 models spanning 16 languages — multi-speaker models cover 1000+ English voices via `voice` field), Qwen3-TTS with voice cloning (CUDA), OpenAI TTS.
 - **Transcription** — Whisper (cloud + local CPU/CUDA), Parakeet (~3400× real-time on CPU).
 - **Web search** — SearXNG self-hosted meta-search (Google, Bing, DuckDuckGo, Wikipedia) via MCP `search_web` tool.
+- **Telegram client** — Telethon at `/telethon/`. Send/read/edit/delete messages, list dialogs, forward, send files from URL, manage group membership. REST API + MCP tools.
+- **Email gateway** — mailbox at `/mailbox/`. Stateless IMAP+SMTP across N accounts from one YAML config — unified inbox, per-account list/search/CRUD, SMTP send. REST API + flat MCP tool set (`mailbox` parameter selects account).
+- **Time-series forecasting** — predictalot at `/predictalot/`. Five foundation forecasters (chronos-2, timesfm-2.5, moirai-2, toto-1, sundial-base-128m) behind one wire shape, plus weighted ensemble. REST API + MCP tools. CPU or CUDA.
 
 Ask a Groq model to research something and it opens a browser, reads pages, screenshots them, uploads to storage, and comes back with a summary and links. The model decides what tools to use and in what order.
 
@@ -108,6 +111,7 @@ Default writable locations:
 | `.data/cloudflared/`                         | cloudflared                  | Tunnel config and credentials (if using named tunnel)                                      |
 | `.data/tailscale/`                           | tailscale                    | Tailscale node state (machine key, DERP info) — auto-created on first run                  |
 | `.data/predictalot/models/`                  | predictalot, predictalot-cuda | Downloaded HuggingFace snapshots for the 5 forecasters (~1.4GB total)                     |
+| `.data/mailbox/`                             | mailbox                      | Recommended host path for the mailbox YAML config (`config.yaml` — gitignored, holds plaintext IMAP/SMTP creds) |
 
 ## Services
 
@@ -125,7 +129,7 @@ Default writable locations:
 | **Ollama** _(optional, `OLLAMA=1`)_                                                                            | Local CPU inference. Runs llama3.2:3b, qwen3:4b, smollm2:1.7b, qwen2.5-coder:1.5b, qwen2.5-coder:3b, phi4-mini, gemma4:e2b, gemma3:4b (vision), nuextract-v1.5 (structured extraction), bge-m3, qwen3-embedding:0.6b (embeddings), dolphin-phi. Models are downloaded automatically on first start and cached in `.data/ollama/`. No GPU required.                            |
 | **Ollama CUDA** _(optional, `OLLAMA_CUDA=1`)_                                                                  | Local NVIDIA GPU inference. Runs all CPU models on GPU plus: qwen3:8b, qwen3:30b-a3b (MoE generalist), qwen2.5vl:7b (vision-language), gemma4:e4b, qwen2.5-coder:7b, deepseek-coder-v2:16b, llama3.1:8b, qwen3-abliterated:16b, gemma4-abliterated:e4b (uncensored vision), deepseek-r1:8b, deepseek-r1:14b (R1-Distill-Qwen-14B), phi4-reasoning:plus (math/reasoning specialist). Flash attention and KV cache enabled. Shares model storage with CPU ollama — no duplicate downloads. Requires `nvidia-container-toolkit`.         |
 | **Speaches** _(optional, `SPEACHES=1`)_                                                                        | Local CPU audio via [speaches-ai/speaches](https://github.com/speaches-ai/speaches). Transcription: `faster-distil-whisper-large-v3` (multilingual) and `parakeet-tdt-0.6b-v2` (English, ~3400× real-time on CPU). Text-to-speech: `Kokoro-82M` int8 (high-quality, English+Chinese-leaning) plus 17 curated Piper TTS models spanning 16 languages. Multi-speaker piper models (LibriTTS English-US with 904 speakers, VCTK English-UK with 109, MLS-FR/NL multi-speaker, Swedish NST) expose individual speakers via the OpenAI `voice` field; single-speaker models ignore `voice`. All lazy-downloaded on first request. Models cached in `.data/speaches/`.                                                     |
-| **Speaches CUDA** _(optional, `SPEACHES_CUDA=1`)_                                                              | CUDA-accelerated Whisper STT via speaches. Uses the same model cache as CPU speaches. Shares `.data/speaches/` — no separate download. Requires `nvidia-container-toolkit`.                                                                                                                                                                                                   |
+| **Speaches CUDA** _(optional, `SPEACHES_CUDA=1`)_                                                              | CUDA-accelerated STT via speaches — Whisper-distil-large-v3 and Parakeet-TDT-0.6b. Uses the same model cache as CPU speaches. Shares `.data/speaches/` — no separate download. Requires `nvidia-container-toolkit`.                                                                                                                                                            |
 | **Qwen3 CUDA TTS** _(optional, `QWEN_TTS_CUDA=1`)_                                                             | CUDA-accelerated TTS via [faster-qwen3-tts](https://github.com/andimarafioti/faster-qwen3-tts). Runs `Qwen3-TTS-12Hz-0.6B-Base` with CUDA graphs. Voice cloning via reference audio. Models cached in `.data/qwen3-tts/`. Requires `nvidia-container-toolkit`.                                                                                                                |
 | **sd.cpp CPU** _(optional, `SDCPP=1`)_                                                                         | Local CPU image generation via [stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp). Go wrapper with OpenAI-compatible `/v1/images/generations` endpoint, model hot-swap, idle timeout auto-unload. Models: sd-turbo, sdxl-turbo. Models cached in `.data/sdcpp/models/`.                                                                                   |
 | **sd.cpp CUDA** _(optional, `SDCPP_CUDA=1`)_                                                                   | CUDA-accelerated image generation via stable-diffusion.cpp. Same wrapper as CPU with CUDA backend. Models: sd-turbo, sdxl-turbo, sdxl-lightning, flux-schnell, juggernaut-xi. Non-blocking — rejects concurrent requests with 503 instead of queuing (resource manager handles scheduling). Requires `nvidia-container-toolkit`.                                              |
@@ -311,7 +315,7 @@ Models auto-download on first use and cache in `.data/sdcpp/models/`.
 
 Local services share limited hardware — a single GPU can't run an LLM, an image generator, and a TTS model simultaneously. The platform handles this automatically so you never have to think about it.
 
-**Automatic unloading** — every local service unloads idle models after a configurable timeout. Ollama unloads after 5 minutes by default. sd.cpp unloads after 5 minutes (`SDCPP_IDLE_TIMEOUT` / `SDCPP_CUDA_IDLE_TIMEOUT`). Speaches and Qwen3-TTS unload on demand. This means VRAM and RAM are only held while a model is actively serving or within its idle window.
+**Automatic unloading** — every local service unloads idle models after a configurable timeout. Ollama unloads after 5 minutes by default. sd.cpp unloads after 5 minutes (`SDCPP_IDLE_TIMEOUT` / `SDCPP_CUDA_IDLE_TIMEOUT`). Speaches and Qwen3-TTS unload on demand. predictalot lazy-loads each forecaster on first call and unloads after `PREDICTALOT_MODEL_IDLE_TIMEOUT` (default `30m`) — only the models you've actually asked for occupy memory. This means VRAM and RAM are only held while a model is actively serving or within its idle window.
 
 **Hardware semaphores** — a LiteLLM callback (`resource_manager.py`) enforces mutual exclusion per hardware. An `asyncio.Semaphore(1)` ensures only one CUDA job runs at a time across all groups (LLM, image gen, TTS, STT). The same applies on CPU. If a CUDA image generation request arrives while a CUDA LLM model is loaded, the request waits for the semaphore, then the resource manager unloads the LLM before the image generation proceeds. This prevents GPU OOM without any manual intervention.
 
@@ -480,6 +484,32 @@ curl http://localhost:4000/embeddings \
   -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
   -H "Content-Type: application/json" \
   -d '{"model": "local-ollama-cpu-bge-m3", "input": "your text here"}'
+
+# time-series forecasting (PREDICTALOT=1 / PREDICTALOT_CUDA=1 — direct route, not via LiteLLM)
+curl http://localhost:4000/predictalot/v1/forecast \
+  -H "Authorization: Bearer $PREDICTALOT_AUTH_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "chronos-2",
+    "context": [[10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]],
+    "config": {"horizon": 5}
+  }'
+
+# mailbox — unified inbox across configured accounts (MAILBOX=1, direct route)
+curl "http://localhost:4000/mailbox/inbox?limit=5" \
+  -H "Authorization: Bearer $MAILBOX_AUTH_TOKEN"
+
+# mailbox — send mail through a configured account
+curl -X POST http://localhost:4000/mailbox/mailboxes/work/send \
+  -H "Authorization: Bearer $MAILBOX_AUTH_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"to": ["someone@example.com"], "subject": "hello", "body_text": "from aigate"}'
+
+# telethon — send a Telegram message (TELETHON=1, direct route)
+curl -X POST http://localhost:4000/telethon/api/messages \
+  -H "Authorization: Bearer $TELETHON_AUTH_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"chat": "@username", "text": "hello from aigate"}'
 ```
 
 ### Async (via proxq)
@@ -526,7 +556,7 @@ Configurable via `.env`:
 | `PROXQ_CACHE_TTL`              | `5m`    | How long cached responses stay fresh                          |
 | `PROXQ_CACHE_MAX_ENTRIES`      | `10000` | Max entries for in-memory LRU cache                           |
 
-→ [Full usage guide](docs/usage.md) — browser automation, object storage, agentic claudebox tasks, vision, streaming, Python SDK examples
+→ [Full usage guide](docs/usage.md) — browser automation, object storage, agentic claudebox tasks, vision, streaming, web search, time-series forecasting, email gateway, Telegram client, Python SDK examples
 
 ## Services Reference
 
@@ -570,13 +600,15 @@ LiteLLM logs every request with the model name, provider, latency, and token usa
 
 Per-service debug options:
 
-| Variable                                   | Default | What it does                 |
-| ------------------------------------------ | ------- | ---------------------------- |
-| `SDCPP_VERBOSE` / `SDCPP_CUDA_VERBOSE`     | `false` | sd.cpp wrapper debug logging |
-| `SDCPP_LOG_LEVEL` / `SDCPP_CUDA_LOG_LEVEL` | `info`  | sd.cpp wrapper log level     |
-| `LIBRECHAT_DEBUG_LOGGING`                  | `true`  | LibreChat verbose logging    |
+| Variable                                   | Default | What it does                                                                       |
+| ------------------------------------------ | ------- | ---------------------------------------------------------------------------------- |
+| `SDCPP_VERBOSE` / `SDCPP_CUDA_VERBOSE`     | `false` | sd.cpp wrapper debug logging                                                       |
+| `SDCPP_LOG_LEVEL` / `SDCPP_CUDA_LOG_LEVEL` | `info`  | sd.cpp wrapper log level                                                           |
+| `LIBRECHAT_DEBUG_LOGGING`                  | `true`  | LibreChat verbose logging                                                          |
+| `PREDICTALOT_LOG_LEVEL`                    | `INFO`  | predictalot log level (`DEBUG` for model-load + per-request diagnostics)           |
+| `TELETHON_LOG_LEVEL`                       | `INFO`  | Telethon Plus log level                                                            |
 
-Ollama and Speaches log to stdout by default — visible in `docker compose logs`.
+Ollama and Speaches log to stdout by default — visible in `docker compose logs`. mailbox doesn't expose a log-level env var — its verbosity is set in the YAML config (`MAILBOX_CONFIG`).
 
 ## Troubleshooting
 
@@ -590,7 +622,13 @@ Ollama and Speaches log to stdout by default — visible in `docker compose logs
 
 **Rate limited on every provider** — all free tiers have hard caps. Quick reference: Groq 30 RPM + 1K-14.4K RPD per model, Cerebras **5 RPM / 30K TPM / 1M TPD on 4 models only**, OpenRouter 20 RPM on `:free` + 50 RPD ($0) or 1K RPD ($10+ credits), Mistral free "Experiment" tier (exact numbers not published — check your dashboard), Cohere 20 RPM chat with a **1K calls/month total cap**, HuggingFace **$0.10/mo credits** (eval only). Full table with official limit pages: [free-tier reality check](docs/providers.md#free-tier-reality-check). If you're hitting all of them at once, the fallback chain lands on flat-rate (claudebox), then pay-per-token (Anthropic/OpenAI), then local. Check `docker compose logs litellm | grep fallback` to see the chain in action. Consider enabling more free providers, or going local (`OLLAMA=1` / `OLLAMA_CUDA=1`) for unlimited.
 
-**Tests failing** — make sure the stack is running (`make run-bg`) and healthy (`docker compose ps`). Tests require the services they're testing to be enabled — `OLLAMA_CUDA=1` for Ollama CUDA tests, `SDCPP_CUDA=1` for sd.cpp CUDA tests, etc. Run `bash test.sh --help` to see which tests are available and their requirements.
+**predictalot first request is slow / times out** — the five forecasters lazy-load on first call. Each downloads ~50-800MB of HuggingFace snapshots into `.data/predictalot/models/` and warms up before responding. `TIMEOUT_PREDICTALOT` defaults to `600s` for exactly this reason. Subsequent calls are fast until `PREDICTALOT_MODEL_IDLE_TIMEOUT` (default 30m) unloads them. Use `PREDICTALOT_PREFETCH` / `PREDICTALOT_PRELOAD` (see [`.env.example`](.env.example)) to download or load models at startup instead of on first request.
+
+**mailbox refuses to start / `MAILBOX_CONFIG` errors** — the stack's pre-flight check requires `MAILBOX_CONFIG` to point at an existing YAML file on the host (`make run` aborts with a clear error otherwise — see `_FILE_VARS` in the Makefile). Copy `mailbox/config.example.yaml` to a gitignored host path (recommended: `.data/mailbox/config.yaml`), fill in your IMAP/SMTP creds, put at least one token in `auth.tokens:`, and mirror it as `MAILBOX_AUTH_TOKEN` in `.env`.
+
+**Telethon "unauthorized" / no profile returned** — Telethon needs all three of `TELETHON_API_ID`, `TELETHON_API_HASH`, `TELETHON_SESSION` set in `.env`. Generate the string session once via `docker run -it --rm -e TELETHON_API_ID=... -e TELETHON_API_HASH=... psyb0t/telethon-plus:v0.2.0 login` — see [Telethon setup](docs/services-reference.md#telethon-plus-optional-telethon1). Without a session, the container starts but the API returns auth errors.
+
+**Tests failing** — make sure the stack is running (`make run-bg`) and healthy (`docker compose ps`). Tests require the services they're testing to be enabled — `OLLAMA_CUDA=1` for Ollama CUDA tests, `SDCPP_CUDA=1` for sd.cpp CUDA tests, `PREDICTALOT=1` / `PREDICTALOT_CUDA=1` for forecasting tests, `MAILBOX=1` for mailbox tests, `TELETHON=1` for Telegram tests. The mailbox e2e send→recv→delete is additionally gated on `MAILBOX_TEST_MAILBOX_NAME` + `MAILBOX_TEST_ADDRESS` so it only fires when you've wired a real test mailbox. Run `bash test.sh --help` to see which tests are available and their requirements.
 
 ## License
 

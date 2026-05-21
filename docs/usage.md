@@ -482,3 +482,111 @@ Enable with `LIBRECHAT=1` in `.env`. Access at `http://localhost:4000/librechat/
 All settings are customizable via `.env` — see [services-reference.md](services-reference.md#librechat-optional-librechat1) for the full list of environment variables.
 
 The LibreChat config file at `librechat/librechat.yaml` controls endpoints, MCP servers, and interface settings. Edit it directly for advanced customization (e.g. adding more MCP servers, changing interface options).
+
+---
+
+## Web search (SearXNG MCP)
+
+With `SEARXNG=1`, the MCP `search_web` tool is auto-registered. Any function-calling model can search the web — the tool aggregates Google, Bing, DuckDuckGo, and Wikipedia results through the self-hosted SearXNG at `/searxng/`.
+
+```bash
+# direct MCP tools/call
+curl -X POST http://localhost:4000/mcp/ \
+  -H "Authorization: Bearer $MCP_TOOLS_AUTH_TOKEN" \
+  -H "Accept: application/json, text/event-stream" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call",
+       "params":{"name":"search_web","arguments":{"query":"site:arxiv.org diffusion models 2026","limit":5}}}'
+```
+
+You can also hit the SearXNG UI directly at `http://localhost:4000/searxng/` for ad-hoc queries (protected by nginx admin auth).
+
+→ [SearXNG service reference](services-reference.md#searxng-optional-searxng1) · [MCP tool schema](mcp-tools.md#mcp_tools-auto-enabled-with-imagetts-search-providers)
+
+---
+
+## Time-series forecasting (predictalot)
+
+With `PREDICTALOT=1` (CPU) or `PREDICTALOT_CUDA=1` (GPU) the `/predictalot/` route exposes five foundation forecasters behind one wire shape — `chronos-2`, `timesfm-2.5`, `moirai-2`, `toto-1`, `sundial-base-128m` — plus a weighted-mean ensemble. Direct route, not registered as a LiteLLM provider. Bearer auth via `PREDICTALOT_AUTH_TOKEN`.
+
+```bash
+# single-model forecast — context is a list-of-series (each inner list is one univariate series)
+curl http://localhost:4000/predictalot/v1/forecast \
+  -H "Authorization: Bearer $PREDICTALOT_AUTH_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "chronos-2",
+    "context": [[10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]],
+    "config": {"horizon": 5}
+  }'
+```
+
+The response contains a median point forecast and per-quantile arrays. Models lazy-load on first call (~50-800MB HuggingFace snapshot) and auto-unload after `PREDICTALOT_MODEL_IDLE_TIMEOUT` (default `30m`). For an ensemble across all five forecasters, use `POST /predictalot/v1/forecast/ensemble`.
+
+The same surface is exposed as MCP tools (`predictalot-forecast_chronos_2`, ..., `predictalot-forecast_ensemble`, `predictalot-list_models`) so any function-calling model can run forecasts autonomously.
+
+→ [predictalot service reference](services-reference.md#predictalot-optional-predictalot1-or-predictalot_cuda1) · [predictalot MCP tools](mcp-tools.md#predictalot--time-series-forecasting-predictalot1-or-predictalot_cuda1)
+
+---
+
+## Email gateway (mailbox)
+
+With `MAILBOX=1`, the `/mailbox/` route fronts N email accounts driven by a single YAML config (`MAILBOX_CONFIG`). Stateless — every read hits the upstream IMAP server live. Bearer auth via `MAILBOX_AUTH_TOKEN` (also mirrored into the config's `auth.tokens:` list).
+
+```bash
+# list configured accounts
+curl http://localhost:4000/mailbox/mailboxes \
+  -H "Authorization: Bearer $MAILBOX_AUTH_TOKEN"
+
+# unified inbox across all accounts (paginated)
+curl "http://localhost:4000/mailbox/inbox?limit=10" \
+  -H "Authorization: Bearer $MAILBOX_AUTH_TOKEN"
+
+# search a specific account
+curl "http://localhost:4000/mailbox/inbox?mailbox=work&subject=invoice&limit=5" \
+  -H "Authorization: Bearer $MAILBOX_AUTH_TOKEN"
+
+# send through a configured account (SMTP)
+curl -X POST http://localhost:4000/mailbox/mailboxes/work/send \
+  -H "Authorization: Bearer $MAILBOX_AUTH_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"to": ["someone@example.com"], "subject": "hello", "body_text": "from aigate"}'
+
+# delete by uid
+curl -X DELETE http://localhost:4000/mailbox/mailboxes/work/messages/<uid> \
+  -H "Authorization: Bearer $MAILBOX_AUTH_TOKEN"
+```
+
+The MCP catalog is flat regardless of how many accounts you've configured — per-account tools take a `mailbox` parameter (name or address) instead of namespacing.
+
+→ [mailbox service reference](services-reference.md#mailbox-optional-mailbox1) · [mailbox MCP tools](mcp-tools.md#mailbox--imapsmtp-gateway-mailbox1)
+
+---
+
+## Telegram client (telethon)
+
+With `TELETHON=1`, the `/telethon/` route fronts a Telegram client using the official MTProto user-account API. Requires `TELETHON_API_ID` / `TELETHON_API_HASH` from [my.telegram.org/apps](https://my.telegram.org/apps) and a string session in `TELETHON_SESSION`. Bearer auth via `TELETHON_AUTH_KEY`.
+
+```bash
+# who am I — verifies the session is authorized
+curl http://localhost:4000/telethon/api/me \
+  -H "Authorization: Bearer $TELETHON_AUTH_KEY"
+
+# list dialogs
+curl "http://localhost:4000/telethon/api/dialogs?limit=10" \
+  -H "Authorization: Bearer $TELETHON_AUTH_KEY"
+
+# send a message (markdown supported via parse_mode)
+curl -X POST http://localhost:4000/telethon/api/messages \
+  -H "Authorization: Bearer $TELETHON_AUTH_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"chat": "@username", "text": "**hello** from aigate", "parse_mode": "md"}'
+
+# read recent messages from a chat
+curl "http://localhost:4000/telethon/api/messages?chat=me&limit=5" \
+  -H "Authorization: Bearer $TELETHON_AUTH_KEY"
+```
+
+Chat references accept `@username`, phone numbers, `t.me/...` links, or numeric IDs as strings. The same surface is exposed as MCP tools (`telethon-send_message`, `telethon-get_dialogs`, etc.) so any function-calling model can operate Telegram on your behalf.
+
+→ [Telethon service reference](services-reference.md#telethon-plus-optional-telethon1) · [Telethon MCP tools](mcp-tools.md#telethon-plus--telegram-client-telethon1)
