@@ -83,7 +83,7 @@ def active_providers(env):
         ("openai",        lambda e: is_flag(e, "OPENAI")),
         ("anthropic",     lambda e: is_flag(e, "ANTHROPIC")),
         ("claudebox",     lambda e: is_flag(e, "CLAUDEBOX")),
-        ("claudebox-zai", lambda e: is_flag(e, "CLAUDEBOX_ZAI")),
+        ("pibox-zai",     lambda e: is_flag(e, "PIBOX_ZAI")),
         ("cerebras",      lambda e: is_flag(e, "CEREBRAS")),
         ("openrouter",    lambda e: is_flag(e, "OPENROUTER")),
         ("huggingface",   lambda e: is_flag(e, "HUGGINGFACE")),
@@ -111,7 +111,7 @@ def active_mcp_servers(env):
         ("hybrids3",      lambda e: is_flag(e, "HYBRIDS3")),
         ("browser",       lambda e: is_flag(e, "BROWSER")),
         ("claudebox",     lambda e: is_flag(e, "CLAUDEBOX")),
-        ("claudebox-zai", lambda e: is_flag(e, "CLAUDEBOX_ZAI")),
+        ("pibox-zai",     lambda e: is_flag(e, "PIBOX_ZAI")),
         ("telethon",      lambda e: is_flag(e, "TELETHON")),
         ("mcp",           lambda e: any(
             is_flag(e, f) for f in ("HUGGINGFACE", "OPENAI", "SPEACHES", "SPEACHES_CUDA", "QWEN_TTS_CUDA", "SDCPP", "SDCPP_CUDA", "SEARXNG")

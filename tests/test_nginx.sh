@@ -6,7 +6,7 @@
 ROUTE_CASES=(
     "root to litellm|/health/liveliness|alive"
     "claudebox proxy|/claudebox/health|ok"
-    "claudebox-zai proxy|/claudebox-zai/health|ok"
+    "pibox-zai proxy|/pibox-zai/healthz|true"
     "stealthy-auto-browse proxy|/stealthy-auto-browse/__queue/health|ok"
     "hybrids3 proxy|/storage/health|ok"
 )
@@ -42,21 +42,21 @@ test_nginx_claudebox_status() {
     echo "OK: nginx_claudebox_status"
 }
 
-test_nginx_claudebox_zai_status() {
+test_nginx_pibox_zai_status() {
     local out code
-    out=$(curl -s -w "\n%{http_code}" "$BASE_URL/claudebox-zai/status" \
-        -H "Authorization: Bearer $CLAUDEBOX_ZAI_API_TOKEN" 2>/dev/null)
+    out=$(curl -s -w "\n%{http_code}" "$BASE_URL/pibox-zai/status" \
+        -H "Authorization: Bearer $PIBOX_ZAI_API_TOKEN" 2>/dev/null)
     code=$(echo "$out" | tail -1)
     local body
     body=$(echo "$out" | sed '$d')
 
     if [ "$code" = "503" ]; then
-        echo "  SKIP: claudebox-zai not ready yet (503)"
-        echo "OK: nginx_claudebox_zai_status (skipped — warmup)"
+        echo "  SKIP: pibox-zai not ready yet (503)"
+        echo "OK: nginx_pibox_zai_status (skipped — warmup)"
         return 0
     fi
-    assert_contains "$body" "busyWorkspaces" "claudebox-zai status via nginx" || return 1
-    echo "OK: nginx_claudebox_zai_status"
+    assert_contains "$body" "busyWorkspaces" "pibox-zai status via nginx" || return 1
+    echo "OK: nginx_pibox_zai_status"
 }
 
 # ── stealthy-auto-browse queue status ──────────────────────────────────────
@@ -120,7 +120,7 @@ test_nginx_admin_rate_limit() {
 ALL_TESTS+=(
     test_nginx_routing
     test_nginx_claudebox_status
-    test_nginx_claudebox_zai_status
+    test_nginx_pibox_zai_status
     test_nginx_sab_queue_status
     test_nginx_admin_auth
     test_nginx_admin_rate_limit

@@ -27,10 +27,10 @@ EXPECTED_MODELS=(
     "claudebox-opus"
     "claudebox-sonnet"
     "claudebox-haiku"
-    # claudebox-zai (GLM via z.ai)
-    "claudebox-glm-5.1"
-    "claudebox-glm-4.7"
-    "claudebox-glm-4.5-air"
+    # pibox-zai (GLM via z.ai)
+    "pibox-zai-glm-5.1"
+    "pibox-zai-glm-4.7"
+    "pibox-zai-glm-4.5-air"
     # Groq
     "groq-llama-3.1-8b"
     "groq-llama-3.3-70b"

@@ -13,7 +13,7 @@ Models across multiple providers. Six providers offer free tiers (Groq, Cerebras
 MCP tools across multiple servers. Any model with function calling can invoke them autonomously — the model orchestrates, you just prompt.
 
 - **Stealth browser cluster** — 5 Camoufox replicas behind HAProxy, real OS-level mouse and keyboard input, zero CDP exposure. Passes Cloudflare, CreepJS, BrowserScan, and every other bot detector we've thrown at it.
-- **Agentic Claude Code ×2** — full shell access, persistent workspaces, file I/O, tool use. One instance on your Claude subscription or API key, one running GLM models through z.ai.
+- **Two agentic coding agents** — full shell access, persistent workspaces, file I/O, tool use. Claude Code (your subscription or API key) and pi-coding-agent pointed at z.ai for GLM models. Both expose REST API, OpenAI-compatible endpoint, and MCP server.
 - **Object storage** — S3-compatible, public-read uploads, presigned URLs, auto-expiry. Plain HTTP and boto3.
 - **Image generation** — FLUX, DALL-E, Stable Diffusion (cloud + local CPU/CUDA via stable-diffusion.cpp) via MCP tools that return persistent URLs, not base64 blobs. Local models: sd-turbo, sdxl-turbo, sdxl-lightning, flux-schnell, juggernaut-xi.
 - **Text-to-speech** — Kokoro (CPU, English+Chinese, voice presets), Piper (CPU, 17 models spanning 16 languages — multi-speaker models cover 1000+ English voices via `voice` field), Qwen3-TTS with voice cloning (CUDA), OpenAI TTS.
@@ -49,7 +49,7 @@ cloudflared (CLOUDFLARED=1) │ tailscale (TAILSCALE=1, tailnet-only)
   ▼
 nginx :4000                                          ┌──────────── always on ────────────┐
   ├─► /claudebox/            → claudebox             │ nginx, LiteLLM, PostgreSQL, Redis │
-  ├─► /claudebox-zai/        → claudebox-zai         │ proxq — everything else is opt-in │
+  ├─► /pibox-zai/            → pibox-zai             │ proxq — everything else is opt-in │
   ├─► /stealthy-auto-browse/ → HAProxy → [browser ×5]└───────────────────────────────────┘
   ├─► /storage/              → hybrids3
   ├─► /q/                    → proxq → LiteLLM (async, returns job ID)
@@ -71,7 +71,7 @@ nginx :4000                                          ┌────────
                                   ├─ sd.cpp CPU         (local, image gen, SDCPP=1)
                                   ├─ sd.cpp CUDA        (local, image gen, SDCPP_CUDA=1)
                                   ├─ claudebox          (flat-rate, CLAUDEBOX=1)
-                                  ├─ claudebox-zai      (flat-rate, CLAUDEBOX_ZAI=1)
+                                  ├─ pibox-zai          (flat-rate, PIBOX_ZAI=1)
                                   ├─ Anthropic          (pay-per-token, ANTHROPIC=1)
                                   └─ OpenAI             (pay-per-token, OPENAI=1)
 
@@ -79,7 +79,7 @@ MCP servers (all optional):
   ├─ stealthy_auto_browse  — run_script: multi-step browser automation (BROWSER=1)
   ├─ hybrids3              — file upload, download, list, delete, presign (HYBRIDS3=1)
   ├─ claudebox             — agentic Claude Code via OAuth or API key (CLAUDEBOX=1)
-  ├─ claudebox_zai         — agentic Claude Code via z.ai/GLM (CLAUDEBOX_ZAI=1)
+  ├─ pibox_zai             — agentic pi-coding-agent via z.ai/GLM (PIBOX_ZAI=1)
   ├─ mcp_tools             — generate_image + generate_tts + search_web (auto-enabled with image/TTS/SearXNG)
   └─ telethon              — Telegram send/read/edit messages, dialogs, files, group management (TELETHON=1)
 ```
@@ -91,9 +91,9 @@ Default writable locations:
 | Path                                         | Used by                      | Notes                                                                                      |
 | -------------------------------------------- | ---------------------------- | ------------------------------------------------------------------------------------------ |
 | `.data/claudebox/config/.always-skills/`     | claudebox                    | Drop `<name>/SKILL.md` files here — injected into every Claude session automatically       |
-| `.data/claudebox-zai/config/.always-skills/` | claudebox-zai                | Same, for the z.ai instance                                                                |
 | `.data/claudebox/workspaces/`                | claudebox                    | Persistent task workspaces                                                                 |
-| `.data/claudebox-zai/workspaces/`            | claudebox-zai                | Persistent task workspaces                                                                 |
+| `.data/pibox-zai/config/`                    | pibox-zai                    | pi config dir (`telegram.yml`, cron history, etc.)                                         |
+| `.data/pibox-zai/workspace/`                 | pibox-zai                    | Persistent workspace root (subdirs per task)                                               |
 | `.data/hybrids3/`                            | hybrids3                     | Object storage data                                                                        |
 | `.data/nginx/`                               | nginx-auth-init              | Generated htpasswd (from `LITELLM_UI_BASIC_AUTH`)                                          |
 | `.data/ollama/`                              | ollama, ollama-cuda          | Downloaded model weights (shared — CPU and CUDA instances read the same blobs)             |
@@ -113,7 +113,8 @@ Default writable locations:
 | **[proxq](https://github.com/psyb0t/docker-proxq)**                                                            | Async HTTP job queue proxy. Sits in front of LiteLLM at `/q/` — queues inference requests in Redis, returns a job ID instantly, forwards to upstream in the background. Poll `/__jobs/{id}` for status, `/__jobs/{id}/content` for the raw response. Only OpenAI API paths are queued (chat/completions, embeddings, audio, images); everything else passes through directly. |
 | **PostgreSQL**                                                                                                 | Key management, budget tracking, usage analytics for LiteLLM.                                                                                                                                                                                                                                                                                                                 |
 | **Redis**                                                                                                      | LiteLLM response cache and rate limiting. Also used by proxq (DB 1) for job queue storage.                                                                                                                                                                                                                                                                                    |
-| **[claudebox](https://github.com/psyb0t/docker-claudebox) ×2** _(optional, `CLAUDEBOX=1` / `CLAUDEBOX_ZAI=1`)_ | Claude Code CLI in API mode. Full agentic loop — shell access, file I/O, tool use, persistent workspaces. One instance uses your OAuth token or Anthropic API key; the other points at z.ai for GLM models. Both expose REST API, OpenAI-compatible endpoint, and MCP server.                                                                                                 |
+| **[claudebox](https://github.com/psyb0t/docker-claudebox)** _(optional, `CLAUDEBOX=1`)_ | Claude Code CLI in API mode. Full agentic loop — shell access, file I/O, tool use, persistent workspaces. Uses your OAuth token (Pro/Max/Team subscription) or Anthropic API key. Exposes REST API, OpenAI-compatible endpoint, and MCP server.                                                                                                 |
+| **[pibox](https://github.com/psyb0t/docker-pibox)** _(optional, `PIBOX_ZAI=1`)_ | [pi-coding-agent](https://github.com/earendil-works/pi-mono) in API mode, pointed at z.ai for GLM models. Speaks the Anthropic wire protocol — same agentic capabilities (shell, files, tools) as claudebox. REST API, OpenAI-compatible endpoint, `/files/*` CRUD, MCP server. The `-zai` suffix is the z.ai backend; future variants (e.g. `PIBOX_OPENAI`, `PIBOX_OR`) can run alongside. |
 | **[hybrids3](https://github.com/psyb0t/docker-hybrids3)** _(optional, `HYBRIDS3=1`)_                           | S3-compatible object storage. Plain HTTP upload/download, boto3-compatible, bearer token auth, auto-expiry, MCP server. The `uploads` bucket is public-read — files are accessible by direct URL without signing.                                                                                                                                                             |
 | **[stealthy-auto-browse](https://github.com/psyb0t/docker-stealthy-auto-browse)** _(optional, `BROWSER=1`)_    | 5 Camoufox (hardened Firefox) replicas behind HAProxy. Real OS-level mouse and keyboard input via PyAutoGUI — no CDP exposure. Passes Cloudflare, CreepJS, BrowserScan, Pixelscan. Redis cookie sync across replicas. REST API and MCP server.                                                                                                                                |
 | **Ollama** _(optional, `OLLAMA=1`)_                                                                            | Local CPU inference. Runs llama3.2:3b, qwen3:4b, smollm2:1.7b, qwen2.5-coder:1.5b, qwen2.5-coder:3b, phi4-mini, gemma4:e2b, gemma3:4b (vision), nuextract-v1.5 (structured extraction), bge-m3, qwen3-embedding:0.6b (embeddings), dolphin-phi. Models are downloaded automatically on first start and cached in `.data/ollama/`. No GPU required.                            |
@@ -163,7 +164,7 @@ Models across multiple providers. Six offer free tiers with no credit card requi
 | Priority    | Tier             | Providers                                                | Reality                                                                                   |
 | ----------- | ---------------- | -------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
 | 1st         | Free cloud       | Groq, Cerebras, OpenRouter, HuggingFace, Mistral, Cohere | Capped — see [free-tier reality check](docs/providers.md#free-tier-reality-check)         |
-| 2nd         | Flat-rate        | claudebox (Max sub), claudebox-zai (z.ai)                | Costs the subscription, no extra per-call                                                 |
+| 2nd         | Flat-rate        | claudebox (Max sub), pibox-zai (z.ai)                    | Costs the subscription, no extra per-call                                                 |
 | 3rd         | Pay-per-token    | Anthropic, OpenAI                                        | Real money per token — last resort before going local                                     |
 | Last resort | Local (CPU/CUDA) | Ollama, Speaches, Qwen3 CUDA TTS, sd.cpp                 | No external limits — bounded only by your hardware                                        |
 
@@ -339,7 +340,7 @@ Everything is opt-in via flags in `.env`. API keys are stored separately and nev
 | `OPENAI=1`        | OpenAI models (gpt-4o, o3, DALL-E, Whisper, TTS)                                          |
 | `ANTHROPIC=1`     | Direct Anthropic API models                                                               |
 | `CLAUDEBOX=1`     | claudebox service + models + MCP server (Claude Code via OAuth or API key)                |
-| `CLAUDEBOX_ZAI=1` | claudebox-zai service + GLM models + MCP server (via z.ai)                                |
+| `PIBOX_ZAI=1`     | pibox-zai service + GLM models + MCP server (pi-coding-agent via z.ai)                    |
 | `CEREBRAS=1`      | Cerebras models (free: 5 RPM / 30K TPM / 1M TPD, 4 models only — see [limits](docs/providers.md#free-tier-reality-check)) |
 | `OPENROUTER=1`    | OpenRouter models (free: 50 RPD at $0, 1K RPD at $10+ credits — see [limits](docs/providers.md#free-tier-reality-check)) |
 | `HUGGINGFACE=1`   | HuggingFace models (free: **$0.10/mo credits only**, eval tier — see [limits](docs/providers.md#free-tier-reality-check)) |

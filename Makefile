@@ -17,9 +17,9 @@ ifeq ($(strip $(CLAUDEBOX)),1)
   _PROFILES += claudebox
 endif
 
-# claudebox-zai: opt-in with CLAUDEBOX_ZAI=1
-ifeq ($(strip $(CLAUDEBOX_ZAI)),1)
-  _PROFILES += claudebox-zai
+# pibox-zai: opt-in with PIBOX_ZAI=1
+ifeq ($(strip $(PIBOX_ZAI)),1)
+  _PROFILES += pibox-zai
 endif
 
 # cloudflared: opt-in with CLOUDFLARED=1
@@ -164,7 +164,7 @@ run-bg:
 	docker compose up -d --build --force-recreate
 
 down:
-	COMPOSE_PROFILES=claudebox,claudebox-zai,cloudflared,hybrids3,browser,ollama,ollama-cuda,sdcpp,sdcpp-cuda,speaches,speaches-cuda,qwen3-cuda-tts,mcp,librechat,searxng,telethon,tailscale \
+	COMPOSE_PROFILES=claudebox,pibox-zai,cloudflared,hybrids3,browser,ollama,ollama-cuda,sdcpp,sdcpp-cuda,speaches,speaches-cuda,qwen3-cuda-tts,mcp,librechat,searxng,telethon,tailscale \
 		docker compose down --remove-orphans
 
 restart: down run-bg
@@ -195,7 +195,7 @@ help:
 	@echo ""
 	@echo "Profiles (set flag to 1 in .env to enable):"
 	@echo "  claudebox     set CLAUDEBOX=1"
-	@echo "  claudebox-zai set CLAUDEBOX_ZAI=1"
+	@echo "  pibox-zai     set PIBOX_ZAI=1 (pi-coding-agent via z.ai/GLM)"
 	@echo "  cloudflared   set CLOUDFLARED=1"
 	@echo "  hybrids3      set HYBRIDS3=1"
 	@echo "  browser       set BROWSER=1"

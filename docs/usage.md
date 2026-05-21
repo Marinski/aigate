@@ -244,11 +244,14 @@ HYBRIDS3_UPLOADS_MAX_SIZE=100MB  # per-file size limit
 
 ---
 
-## Claudebox — Agentic Tasks
+## Agentic coding — Claudebox + Pibox-zai
 
-[Claudebox](https://github.com/psyb0t/docker-claudebox) wraps Claude Code in a Docker container and exposes it as an API. Each request runs Claude Code's full agentic loop — it can read/write files, run shell commands, install packages, browse the web, and use tools, all within an isolated workspace.
+Two agentic services wrap a coding agent in a Docker container and expose it as an API. Each request runs the agent's full loop — read/write files, run shell commands, install packages, browse the web, use tools, all within an isolated workspace.
 
-Two instances: one using your OAuth token or Anthropic API key (`claudebox-*` models), one connected to z.ai for GLM models (`claudebox-glm-*` models). Both have identical APIs and workspace capabilities.
+- **[Claudebox](https://github.com/psyb0t/docker-claudebox)** — Claude Code, OAuth token or Anthropic API key. Models: `claudebox-haiku`, `claudebox-sonnet`, `claudebox-opus`.
+- **[Pibox-zai](https://github.com/psyb0t/docker-pibox)** — [pi-coding-agent](https://github.com/earendil-works/pi-mono) pointed at z.ai for GLM models. Models: `pibox-zai-glm-4.5-air`, `pibox-zai-glm-4.7`, `pibox-zai-glm-5.1`. Adds `/files/*` CRUD plus optional Telegram + cron modes.
+
+Both speak the Anthropic wire protocol and expose the same shape of API (sync + async `/run`, OpenAI-compatible `/v1/chat/completions`, MCP server).
 
 ### Via LiteLLM chat completions
 

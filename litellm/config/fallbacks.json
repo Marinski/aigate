@@ -2,7 +2,7 @@
   {
     "anthropic-claude-opus-4": [
       "claudebox-opus",
-      "claudebox-glm-5.1",
+      "pibox-zai-glm-5.1",
       "mistral-large",
       "cohere-command-a",
       "or-hermes-3-405b",
@@ -15,7 +15,7 @@
   {
     "anthropic-claude-sonnet-4": [
       "claudebox-sonnet",
-      "claudebox-glm-4.7",
+      "pibox-zai-glm-4.7",
       "mistral-small",
       "cohere-command-a",
       "or-qwen3-80b",
@@ -29,7 +29,7 @@
   {
     "anthropic-claude-haiku-4": [
       "claudebox-haiku",
-      "claudebox-glm-4.5-air",
+      "pibox-zai-glm-4.5-air",
       "ministral-8b",
       "cohere-command-r7b",
       "groq-llama-3.1-8b",
@@ -44,7 +44,7 @@
   },
   {
     "claudebox-opus": [
-      "claudebox-glm-5.1",
+      "pibox-zai-glm-5.1",
       "mistral-large",
       "cohere-command-a",
       "or-hermes-3-405b",
@@ -58,7 +58,7 @@
   },
   {
     "claudebox-sonnet": [
-      "claudebox-glm-4.7",
+      "pibox-zai-glm-4.7",
       "mistral-small",
       "cohere-command-a",
       "or-qwen3-80b",
@@ -72,7 +72,7 @@
   },
   {
     "claudebox-haiku": [
-      "claudebox-glm-4.5-air",
+      "pibox-zai-glm-4.5-air",
       "ministral-8b",
       "cohere-command-r7b",
       "groq-llama-3.1-8b",
@@ -87,7 +87,7 @@
     ]
   },
   {
-    "claudebox-glm-5.1": [
+    "pibox-zai-glm-5.1": [
       "claudebox-opus",
       "mistral-large",
       "cohere-command-a",
@@ -101,7 +101,7 @@
     ]
   },
   {
-    "claudebox-glm-4.7": [
+    "pibox-zai-glm-4.7": [
       "claudebox-sonnet",
       "mistral-small",
       "cohere-command-a",
@@ -115,7 +115,7 @@
     ]
   },
   {
-    "claudebox-glm-4.5-air": [
+    "pibox-zai-glm-4.5-air": [
       "claudebox-haiku",
       "ministral-8b",
       "cohere-command-r7b",
@@ -140,7 +140,7 @@
       "groq-llama-3.3-70b",
       "hf-llama-3.3-70b",
       "claudebox-opus",
-      "claudebox-glm-5.1",
+      "pibox-zai-glm-5.1",
       "anthropic-claude-opus-4",
       "openai-gpt-4o"
     ]
@@ -159,7 +159,7 @@
   },
   {
     "cerebras-glm-4.7": [
-      "claudebox-glm-4.7",
+      "pibox-zai-glm-4.7",
       "claudebox-sonnet",
       "mistral-small",
       "cohere-command-a",
@@ -207,7 +207,7 @@
       "or-llama-3.3-70b",
       "hf-llama-3.3-70b",
       "claudebox-sonnet",
-      "claudebox-glm-4.7",
+      "pibox-zai-glm-4.7",
       "openai-gpt-4o"
     ]
   },
@@ -385,7 +385,7 @@
       "cerebras-gpt-oss-120b",
       "hf-llama-3.3-70b",
       "claudebox-sonnet",
-      "claudebox-glm-4.7",
+      "pibox-zai-glm-4.7",
       "openai-gpt-4o",
       "anthropic-claude-sonnet-4"
     ]
@@ -401,7 +401,7 @@
       "cerebras-qwen3-235b",
       "hf-llama-3.3-70b",
       "claudebox-sonnet",
-      "claudebox-glm-4.7",
+      "pibox-zai-glm-4.7",
       "openai-gpt-4o",
       "anthropic-claude-sonnet-4"
     ]
@@ -431,7 +431,7 @@
       "cerebras-qwen3-235b",
       "hf-llama-3.3-70b",
       "claudebox-sonnet",
-      "claudebox-glm-4.7",
+      "pibox-zai-glm-4.7",
       "openai-gpt-4o"
     ]
   },
@@ -481,7 +481,7 @@
       "cerebras-qwen3-235b",
       "groq-qwen3-32b",
       "claudebox-sonnet",
-      "claudebox-glm-4.7",
+      "pibox-zai-glm-4.7",
       "openai-gpt-4o",
       "local-ollama-cpu-qwen2.5-coder-1.5b"
     ]

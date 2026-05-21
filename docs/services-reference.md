@@ -35,13 +35,13 @@ curl http://localhost:4000/chat/completions \
   }'
 ```
 
-Available models: `claudebox-haiku`, `claudebox-sonnet`, `claudebox-opus`, `claudebox-glm-4.5-air`, `claudebox-glm-4.7`, `claudebox-glm-5.1`
+Available models: `claudebox-haiku`, `claudebox-sonnet`, `claudebox-opus`, `pibox-zai-glm-4.5-air`, `pibox-zai-glm-4.7`, `pibox-zai-glm-5.1`
 
 ### Direct API endpoints
 
-Base URLs: `http://localhost:4000/claudebox/` (OAuth/API key) and `http://localhost:4000/claudebox-zai/` (GLM).
+Base URLs: `http://localhost:4000/claudebox/` (Claude Code via OAuth/API key) and `http://localhost:4000/pibox-zai/` (pi-coding-agent via z.ai/GLM).
 
-All endpoints (except `/health`) require `Authorization: Bearer $CLAUDEBOX_API_TOKEN` (or `$CLAUDEBOX_ZAI_API_TOKEN` for the zai instance).
+`claudebox/*` requires `Authorization: Bearer $CLAUDEBOX_API_TOKEN`. `pibox-zai/*` requires `Authorization: Bearer $PIBOX_ZAI_API_TOKEN`. Health endpoints are open. Pibox uses `/healthz` (not `/health`); the rest of the path shape (`/run`, `/run/{id}`, `/v1/chat/completions`, `/mcp`, `/files/{path}`) is the same except `/files/` is workspace-rooted on pibox vs. workspace-prefixed on claudebox.
 
 | Method | Path                                  | Description                                              |
 | ------ | ------------------------------------- | -------------------------------------------------------- |

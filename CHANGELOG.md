@@ -2,6 +2,73 @@
 
 All notable changes to this project are documented here.
 
+## [v2.0.0] — 2026-05-21
+
+**BREAKING: replace `claudebox-zai` with `pibox-zai` (psyb0t/docker-pibox).**
+
+Breaking changes for any caller hitting the removed surfaces:
+
+- LiteLLM models `claudebox-zai-*` → `pibox-zai-glm-{4.5-air,4.7,5.1}`
+- Nginx route `/claudebox-zai/*` → `/pibox-zai/*`
+- Env vars `CLAUDEBOX_ZAI_*` → `PIBOX_ZAI_*`
+- Data dir `.data/claudebox-zai/` → `.data/pibox-zai/`
+
+Migration: rename env vars, move data dir (then `rm .data/pibox-zai/config/.init-done` so init.d re-seeds models.json), update model names in callers, update direct-route consumers.
+
+Why:
+
+- Swap the z.ai/GLM backend from a second `psyb0t/claudebox` instance to `psyb0t/pibox:v0.3.1` ([pi-coding-agent](https://github.com/earendil-works/pi-mono) wrapped in `aicodebox`). Pi speaks the Anthropic wire protocol natively — no Claude Code OAuth/license ceremony required.
+- The `-zai` suffix names the upstream backend — future sibling services (e.g. `pibox-or`, `pibox-openai`) can run alongside, each pinned to its own provider.
+- New endpoint surface vs. claudebox-zai: pibox uses `/healthz` (not `/health`), adds `/files/*` CRUD (PUT/GET/list/DELETE), exposes MCP at `/mcp/` (opt-in via `PIBOX_MCP_MODE=1`, on by default), and `/run` for native (non-OpenAI-compat) agent execution.
+- LiteLLM model names updated: `pibox-zai-glm-4.5-air`, `pibox-zai-glm-4.7`, `pibox-zai-glm-5.1`. Fallback chains updated accordingly.
+- Add `tests/test_pibox.sh` — 7 end-to-end tests covering reachability, direct API auth, file ops CRUD, model surfaces (pibox-native + via LiteLLM), chat completion through LiteLLM, and native `/run`. Tests gate on `PIBOX_ZAI=1` and auto-skip otherwise.
+- `tests/test_claudebox.sh` stripped of pibox tests and gated on `CLAUDEBOX=1`.
+- Provider docs, services reference, MCP tools doc, README, `.env.example`, `recommend-limits.sh`, security tests all updated to the new naming.
+
+## [v1.6.3] — 2026-05-19
+
+**Docs: correct free-tier rate-limit claims.**
+
+- Cerebras: 5 RPM / 1M TPD on 4 models (verified against official docs).
+- Mistral: free-tier limits not published — claim removed.
+- Cross-verified Groq, OpenRouter, Hugging Face, Cohere claims against current provider documentation.
+
+## [v1.6.2] — 2026-05-18
+
+**Fix nginx prefix-stripping on variable-based `proxy_pass` routes.**
+
+- nginx does not strip the location prefix when `proxy_pass` uses a variable (resolver-deferred upstreams). Added explicit `rewrite` rules to 5 routes: `/claudebox/`, `/claudebox-zai/`, `/stealthy-auto-browse/`, `/librechat/`, `/searxng/`.
+- Drop dead `langfuse/.gitkeep` (langfuse service was never landed).
+
+## [v1.6.1] — 2026-05-15
+
+**Bump claudebox v1.13.1-minimal → v1.14.0-minimal: OpenAI-compat wrapper hardening.**
+
+- Multi-turn workspace fix (workspace was lost on follow-up turns).
+- SSRF guard on `/openai/v1/files`.
+- `finish_reason` mapping (stop / length / tool_calls).
+- 400 on unsupported request fields instead of silent ignore.
+- `reasoning_effort` snake_case binding now propagates to the agent.
+
+## [v1.6.0] — 2026-05-10
+
+**Security patches + claudebox v1.13.1 + reasoning/vision models + Piper TTS.**
+
+- **Security:** LiteLLM v1.83.5-nightly → v1.83.14-stable.patch.2 fixes CVE-2026-42208 (pre-auth SQL injection in API key verification, CVSS 9.3). Stable cosign-signed channel after the supply-chain incident on the v1.83.x line.
+- **Security:** Redis 7.4.8-alpine → 7.4.9-alpine for RCE/UAF CVEs disclosed 2026-05-05. Applied to both `redis` and `stealthy-auto-browse-redis`.
+- **Claudebox:** v1.9.0-minimal → v1.13.1-minimal (11 versions, mostly cron+telegram fixes irrelevant to aigate's API-only usage). v1.11.0 surfaces `opusplan` in `/openai/v1/models` — added `claudebox-opusplan` provider entry.
+- **New local CUDA reasoning/vision models (4):** `local-ollama-cuda-phi4-reasoning-plus` (Phi-4 Reasoning Plus 14B+RL, ~11GB), `local-ollama-cuda-deepseek-r1-14b` (~9GB), `local-ollama-cuda-qwen3-30b-a3b` (Qwen3 30B MoE / 3B active, ~17GB), `local-ollama-cuda-qwen2.5vl-7b` (Qwen2.5-VL 7B vision, ~5GB). All added to `ollama-pull` for auto-download.
+- **New local CPU Piper TTS models (17 across 16 languages):** fills the multilingual TTS gap. Multi-speaker: `en_US-libritts-high` (904 voices), `en_GB-vctk-medium` (109), `fr_FR-mls-medium`, `nl_NL-mls-medium`, `sv_SE-nst-medium`. Single-speaker: de/es/it/pl/pt-BR/ro/ru/tr/uk/vi/zh/ar. Served via the existing `speaches` container.
+- **New fallback chains:** 5 chains added to `litellm/config/fallbacks.json` for the new reasoning + vision models.
+- No env var or breaking changes.
+
+## [v1.5.0] — 2026-05-08
+
+**Tailscale support (L4 TCPForward) + rename internal docker networks `aigate-*`.**
+
+- Add optional Tailscale container that publishes the aigate stack onto a tailnet via L4 TCPForward — no per-service TLS ceremony required, mesh VPN handles auth + encryption at the network layer.
+- Rename docker networks `aicodebox-*` → `aigate-*` for clarity (the stack outgrew the original aicodebox-only naming).
+
 ## [v1.4.2] — 2026-04-29
 
 **Bump claudebox to v1.9.0-minimal.**
@@ -27,6 +94,18 @@ All notable changes to this project are documented here.
 - Add `tests/test_telethon.sh` — health check via MCP `get_me`, tool count assertion, LLM-driven send/verify/delete test (model autonomously calls get_me, send_message, get_messages, delete_messages; post-run check confirms message actually gone)
 - Update README, docs, `.env.example` with Telethon service details
 - Bump claudebox and claudebox-zai to `v1.8.0-minimal`
+
+## [v1.3.4] — 2026-04-28
+
+**Docs cleanup: remove hardcoded counts.**
+
+- Strip hardcoded service/model counts from README and docs — these go stale on every addition. Counts now sourced from `litellm/config/*` at build time.
+
+## [v1.3.3] — 2026-04-28
+
+**Fix nginx startup crash on disabled optional services.**
+
+- nginx crashed with `host not found in upstream` when `CLAUDEBOX`, `HYBRIDS3`, `LIBRECHAT`, `SEARXNG`, or `BROWSER` were disabled. Fixed by adding Docker DNS resolver (`resolver 127.0.0.11`) and switching all optional upstreams to variable-based `proxy_pass` (defers hostname resolution to request time).
 
 ## [v1.3.2] — 2026-04-29
 
@@ -77,6 +156,14 @@ All notable changes to this project are documented here.
 
 - **v1.1.1** — proxq v0.9.0, rate limit 600r/m, upstream timeout 30m
 
+## [v1.1.1] — 2026-04-25
+
+**proxq v0.9.0, raise rate limit, 30m upstream timeout.**
+
+- Bump proxq to v0.9.0 — fixes timeout config not being applied to the HTTP client.
+- Raise nginx proxq rate limit 120r/m → 600r/m for higher-throughput workloads.
+- `PROXQ_UPSTREAM_TIMEOUT` default 10m → 30m to accommodate long-running model calls.
+
 ## [v1.1.0] — 2026-04-24
 
 **Local model lineup overhaul: gemma4, abliterated, reasoning, better code models.**
@@ -96,6 +183,13 @@ CUDA (ollama-cuda):
 
 - **v1.0.1** — recommend-limits.sh: OS memory reserve (2 GB or 5% RAM), CPU local services use max-of-active + idle overhead like CUDA group. Add CHANGELOG.md.
 
+## [v1.0.1] — 2026-04-24
+
+**OS memory reserve + CPU resource-manager-aware scaling.**
+
+- Reserve 2 GB or 5% of RAM (whichever larger) for the OS before service allocation in `recommend-limits.sh`.
+- CPU local services (ollama, speaches, sdcpp) now use `max-of-active + idle overhead` in concurrent RAM calculation — same accounting as the CUDA group.
+
 ## [v1.0.0] — 2026-04-24
 
 **Breaking:** Global `CUDA=1` replaced with per-service flags.
@@ -107,6 +201,33 @@ CUDA (ollama-cuda):
 - Each CUDA service independently toggleable — no more implicit activation
 - Docker Compose profiles, Makefile, build-config, resource calculator, tests, and all docs updated
 - Fixed flaky tests: removed stale HF image models, fixed CUDA STT input, simplified dolphin-phi test
+
+## [v0.13.3] — 2026-04-23
+
+**Merge ollama pullers into a single service.**
+
+- One `ollama-pull` service with `PULL_CPU` / `PULL_CUDA` flags replaces the separate `ollama-pull` + `ollama-cuda-pull` services.
+- CUDA puller now pulls all models (CPU + CUDA) when both flags are on.
+
+## [v0.13.2] — 2026-04-23
+
+**Fallback chains for all 99 models + resource management docs.**
+
+- Complete fallback coverage: every model has a chain. Local preferred over paid for image / TTS / STT. Bogus `cpu-flux-schnell` references removed.
+- README expanded with fallback chains, resource management, troubleshooting, and logs sections.
+
+## [v0.12.1] — 2026-04-23
+
+**Fix model prefix to include provider name.**
+
+- Correct v0.12.0 rename: `local-cpu-*` → `local-ollama-cpu-*`, etc. Provider name is now part of the local-model prefix so future local backends (sdcpp, speaches) don't collide.
+
+## [v0.13.1] — 2026-04-23
+
+**Hardcode sdcpp listen address + documentation updates.**
+
+- Hardcode wrapper listen address (`0.0.0.0:7234`) in the Go binary; remove from `docker-compose.yml` env config.
+- Comprehensive documentation updates for the sd.cpp integration.
 
 ## [v0.13.0] — 2026-04-23
 
@@ -136,6 +257,12 @@ CUDA (ollama-cuda):
 
 - **v0.12.1** — Fix prefix to include provider name (local-cpu → local-ollama-cpu)
 
+## [v0.11.1] — 2026-04-22
+
+**Docs: add LibreChat + MCP tools sections, fix stale counts.**
+
+- Docs-only patch. No code changes.
+
 ## [v0.11.0] — 2026-04-22
 
 **MCP media tools, LibreChat web UI, image pinning.**
@@ -148,6 +275,12 @@ CUDA (ollama-cuda):
 ### Patches
 
 - **v0.11.1** — Docs: add LibreChat + MCP tools docs, fix stale counts (94→92 models, 18→20 tools)
+
+## [v0.10.1] — 2026-04-21
+
+**Docs: correct counts, optional labels, fix broken browser examples.**
+
+- Docs-only patch. No code changes.
 
 ## [v0.10.0] — 2026-04-21
 
@@ -196,6 +329,31 @@ CUDA (ollama-cuda):
 - **v0.7.2** — Full proxq config via env vars (concurrency, retention, retries, caching)
 - **v0.7.1** — Configurable nginx rate limits + timeouts via env vars, proxq v0.5.1
 
+## [v0.7.3] — 2026-04-18
+
+**Bump proxq.**
+
+- Routine proxq image bump.
+
+## [v0.7.2] — 2026-04-18
+
+**proxq v0.5.1, full proxq config via env.**
+
+- All proxq tunables now configurable via env vars (per-upstream retries, timeouts, OpenAI client package).
+
+## [v0.7.1] — 2026-04-18
+
+**Configurable rate limits + timeouts, proxq v0.5.1.**
+
+- Bump proxq v0.4.1 → v0.5.1 (Go OpenAI client package, job header tracking).
+- Nginx rate-limit and timeout values exposed via env vars.
+
+## [v0.6.6] — 2026-04-17
+
+**Fix db.**
+
+- DB-related patch.
+
 ## [v0.6.5] — 2026-04-17
 
 **Dynamic config build, all providers/services opt-in via flags.**
@@ -208,6 +366,32 @@ CUDA (ollama-cuda):
 ### Patches
 
 - **v0.6.6** — Fix DB
+
+## [v0.6.4] — 2026-04-17
+
+**Bump service image versions.**
+
+- claudebox: v1.3.0-minimal → v1.4.0-minimal.
+- stealthy-auto-browse: v0.21.0 → v0.22.5.
+
+## [v0.6.3] — 2026-04-17
+
+**Enable client-side JSON schema validation in LiteLLM.**
+
+- `enable_json_schema_validation: true` in `litellm_settings` — catches providers that treat `json_schema` as a hint (Gemini 1.5, older Anthropic models) and rejects non-conforming responses on the gateway side.
+- README documents the JSON schema validation in the LiteLLM service description.
+
+## [v0.6.2] — 2026-04-16
+
+**Bump claudebox image.**
+
+- Routine claudebox image bump.
+
+## [v0.6.1] — 2026-04-16
+
+**Minor fixes.**
+
+- Misc. patch-level fixes (commit message: `f`). See `git log v0.6.0..v0.6.1` for the diff.
 
 ## [v0.6.0] — 2026-04-15
 
@@ -250,6 +434,12 @@ CUDA (ollama-cuda):
 ## [v0.2.0] — 2026-04-15
 
 Initial feature expansion.
+
+## [v0.1.1] — 2026-04-15
+
+**Pin cloudflared image.**
+
+- Pin cloudflared to a specific image tag for reproducibility.
 
 ## [v0.1.0] — 2026-04-15
 

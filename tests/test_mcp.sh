@@ -20,7 +20,7 @@ MCP_SERVER_TOOL_COUNTS=(
     "stealthy_auto_browse|1"
     "hybrids3|5"
     "claudebox-|3"
-    "claudebox_zai-|3"
+    "pibox_zai-|3"
     "mcp_tools-|1"
 )
 
@@ -76,8 +76,8 @@ EXPECTED_MCP_TOOLS=(
     "claudebox-write_file"
     "claudebox-list_files"
     "claudebox-delete_file"
-    "claudebox_zai-claude_run"
-    "claudebox_zai-read_file"
+    "pibox_zai-run_prompt"
+    "pibox_zai-read_file"
     "mcp_tools-generate_image"
     "mcp_tools-generate_tts"
 )

@@ -6,7 +6,7 @@
 HEALTH_CASES=(
     "litellm liveliness|$BASE_URL/health/liveliness|alive"
     "claudebox health|$BASE_URL/claudebox/health|ok"
-    "claudebox-zai health|$BASE_URL/claudebox-zai/health|ok"
+    "pibox-zai health|$BASE_URL/pibox-zai/healthz|true"
     "stealthy-auto-browse health|$BASE_URL/stealthy-auto-browse/__queue/health|ok"
     "hybrids3 health|$BASE_URL/storage/health|ok"
 )
@@ -26,7 +26,7 @@ test_health_endpoints() {
 
 REQUIRED_SERVICES=(
     "claudebox"
-    "claudebox-zai"
+    "pibox-zai"
     "hybrids3"
     "litellm"
     "nginx"

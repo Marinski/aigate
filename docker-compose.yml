@@ -132,29 +132,29 @@ services:
       - aigate-internal
       - aigate-public
 
-  claudebox-zai:
-    profiles: ["claudebox-zai"]
-    image: psyb0t/claudebox:v1.14.0-minimal
+  pibox-zai:
+    profiles: ["pibox-zai"]
+    image: psyb0t/pibox:v0.3.1
     restart: unless-stopped
-    mem_limit: ${CLAUDEBOX_ZAI_MEM_LIMIT:-1g}
-    memswap_limit: ${CLAUDEBOX_ZAI_MEMSWAP_LIMIT:-2g}
-    cpus: ${CLAUDEBOX_ZAI_CPUS:-2.0}
+    mem_limit: ${PIBOX_ZAI_MEM_LIMIT:-1g}
+    memswap_limit: ${PIBOX_ZAI_MEMSWAP_LIMIT:-2g}
+    cpus: ${PIBOX_ZAI_CPUS:-2.0}
     environment:
-      CLAUDE_MODE_API: "1"
-      CLAUDE_MODE_API_PORT: "8080"
-      CLAUDE_MODE_API_TOKEN: ${CLAUDEBOX_ZAI_API_TOKEN:-lulz-4-security-zai}
-      ANTHROPIC_AUTH_TOKEN: ${CLAUDEBOX_ZAI_AUTH_TOKEN}
+      PIBOX_API_MODE: "1"
+      PIBOX_API_MODE_PORT: "8080"
+      PIBOX_API_MODE_TOKEN: ${PIBOX_ZAI_API_TOKEN:-lulz-4-security-zai}
+      PIBOX_MCP_MODE: "1"
+      PIBOX_MCP_MODE_TOKEN: ${PIBOX_ZAI_API_TOKEN:-lulz-4-security-zai}
+      PIBOX_AVAILABLE_MODELS: ${PIBOX_ZAI_AVAILABLE_MODELS:-glm-4.5-air,glm-4.7,glm-5.1}
+      ANTHROPIC_API_KEY: ${PIBOX_ZAI_AUTH_TOKEN}
+      ANTHROPIC_AUTH_TOKEN: ${PIBOX_ZAI_AUTH_TOKEN}
       ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
-      API_TIMEOUT_MS: "3000000"
-      CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
-      ANTHROPIC_DEFAULT_OPUS_MODEL: ${ZAI_OPUS_MODEL:-glm-5.1}
-      ANTHROPIC_DEFAULT_SONNET_MODEL: ${ZAI_SONNET_MODEL:-glm-4.7}
-      ANTHROPIC_DEFAULT_HAIKU_MODEL: ${ZAI_HAIKU_MODEL:-glm-4.5-air}
+      ANTHROPIC_MODEL: ${PIBOX_ZAI_DEFAULT_MODEL:-glm-4.7}
     volumes:
-      - ${DATA_DIR_CLAUDEBOX_ZAI:-${DATA_DIR:-.data}/claudebox-zai}/config:/home/claude/.claude
-      - ${DATA_DIR_CLAUDEBOX_ZAI:-${DATA_DIR:-.data}/claudebox-zai}/workspaces:/workspaces
+      - ${DATA_DIR_PIBOX_ZAI:-${DATA_DIR:-.data}/pibox-zai}/config:/home/aicode/.aicodebox
+      - ${DATA_DIR_PIBOX_ZAI:-${DATA_DIR:-.data}/pibox-zai}/workspace:/workspace
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:8080/health"]
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/healthz"]
       interval: 15s
       timeout: 5s
       retries: 5
@@ -963,12 +963,12 @@ configs:
               proxy_cache off;
           }
 
-          # claudebox-zai (GLM models) — full API access
-          location /claudebox-zai/ {
+          # pibox-zai (GLM models via z.ai) — full API access
+          location /pibox-zai/ {
               limit_req zone=claudebox burst=${RATELIMIT_CLAUDEBOX_BURST:-10} nodelay;
-              set $$upstream_claudebox_zai http://claudebox-zai:8080;
-              rewrite ^/claudebox-zai/(.*) /$$1 break;
-              proxy_pass $$upstream_claudebox_zai;
+              set $$upstream_pibox_zai http://pibox-zai:8080;
+              rewrite ^/pibox-zai/(.*) /$$1 break;
+              proxy_pass $$upstream_pibox_zai;
               proxy_set_header Host localhost:8080;
               proxy_set_header X-Real-IP $$remote_addr;
               proxy_set_header X-Forwarded-For $$proxy_add_x_forwarded_for;

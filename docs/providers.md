@@ -17,7 +17,7 @@ Numbers below were correct at last check (provider docs change — click through
 | Mistral      | No           | not published         | not published                        | not published                        | "Experiment" plan exists but Mistral doesn't publish numeric limits — see Admin → Limits in console after sign-up. Only `mistral-large`, `mistral-small`, `ministral-8b`, `mistral-embed` are free-tier. | [docs.mistral.ai/admin/user-management-finops/tier](https://docs.mistral.ai/admin/user-management-finops/tier)         |
 | Cohere       | No           | 20 RPM chat, 10 RPM rerank, 2K inputs/min embed | —                          | **1,000 API calls/month** (chat)     | Hard monthly request cap is very low — runs out fast on any real workload.            | [docs.cohere.com/v2/docs/rate-limits](https://docs.cohere.com/v2/docs/rate-limits)                                     |
 | Claudebox    | Subscription | depends on plan       | depends on plan                      | —                                    | Uses your Claude Pro/Max OAuth — no extra cost beyond the sub.                       | [anthropic.com/pricing](https://www.anthropic.com/pricing)                                                            |
-| Claudebox-zai| Subscription | depends on plan       | depends on plan                      | —                                    | Uses your z.ai subscription.                                                          | [z.ai](https://z.ai)                                                                                                  |
+| Pibox-zai    | Subscription | depends on plan       | depends on plan                      | —                                    | pi-coding-agent pointed at z.ai — uses your z.ai subscription.                       | [z.ai](https://z.ai)                                                                                                  |
 | Anthropic    | **Yes**      | tiered                | tiered                               | pay-per-token, no free tier          | Not free. Standard API.                                                              | [docs.anthropic.com/en/api/rate-limits](https://docs.anthropic.com/en/api/rate-limits)                                |
 | OpenAI       | **Yes**      | tiered                | tiered                               | pay-per-token, no free tier          | Not free. Standard API.                                                              | [platform.openai.com/docs/guides/rate-limits](https://platform.openai.com/docs/guides/rate-limits)                    |
 | Local (CPU / CUDA) | N/A    | unlimited             | unlimited                            | unlimited                            | Only constrained by your hardware. Last-resort fallback when all cloud tiers fail.   | —                                                                                                                     |
@@ -137,15 +137,17 @@ Set up with `claude setup-token` or generate at [console.anthropic.com](https://
 | `claudebox-sonnet` | Claude Sonnet 4.6     | Daily coding, balanced speed/intelligence        |
 | `claudebox-opus`   | Claude Opus 4.6       | Complex reasoning, architecture, hard debugging  |
 
-## Claudebox GLM — via z.ai (requires z.ai account)
+## Pibox-zai — pi-coding-agent via z.ai (requires z.ai account)
 
-[z.ai](https://z.ai) provides an Anthropic-compatible API backed by GLM models. Routed through a second claudebox instance pointed at z.ai — same agentic capabilities (shell, files, tools) as the OAuth instance above.
+[z.ai](https://z.ai) provides an Anthropic-compatible API backed by GLM models. Routed through [pibox](https://github.com/psyb0t/docker-pibox) — [pi-coding-agent](https://github.com/earendil-works/pi-mono) wrapped in an API server, pointed at z.ai. Same agentic capabilities (shell, files, tools, MCP) as claudebox. Why pibox over a second claudebox: pi speaks the Anthropic wire protocol natively, no Claude Code license/OAuth ceremony, and pibox adds a `/files/*` CRUD API plus optional Telegram + cron modes for free. The `-zai` suffix names the upstream — future `PIBOX_*` flags can run pi against OpenAI, OpenRouter, etc.
 
-| Alias                   | Underlying model |
-| ----------------------- | ---------------- |
-| `claudebox-glm-4.5-air` | GLM-4.5-Air      |
-| `claudebox-glm-4.7`     | GLM-4.7          |
-| `claudebox-glm-5.1`     | GLM-5.1          |
+| Alias                       | Underlying model |
+| --------------------------- | ---------------- |
+| `pibox-zai-glm-4.5-air`     | GLM-4.5-Air      |
+| `pibox-zai-glm-4.7`         | GLM-4.7          |
+| `pibox-zai-glm-5.1`         | GLM-5.1          |
+
+Override the exposed list with `PIBOX_ZAI_AVAILABLE_MODELS=glm-4.5-air,glm-4.7,glm-5.1` and the default model with `PIBOX_ZAI_DEFAULT_MODEL=glm-4.7` in `.env`.
 
 ## Anthropic (optional, API key required)
 
@@ -275,4 +277,4 @@ CUDA-accelerated image generation. Same Go wrapper with CUDA backend. Non-blocki
 
 Every model has its own fallback chain. When a provider fails, is rate-limited, or returns an error, LiteLLM automatically tries the next model in the chain. Free providers are always tried first.
 
-For example, `groq-llama-3.3-70b` falls back through `cerebras-qwen3-235b` → `mistral-small` → `cohere-command-r` → `or-llama-3.3-70b` → `hf-llama-3.3-70b` → `claudebox-sonnet` → `claudebox-glm-4.7` → `openai-gpt-4o`. See `litellm/config/fallbacks.json` for all chains.
+For example, `groq-llama-3.3-70b` falls back through `cerebras-qwen3-235b` → `mistral-small` → `cohere-command-r` → `or-llama-3.3-70b` → `hf-llama-3.3-70b` → `claudebox-sonnet` → `pibox-zai-glm-4.7` → `openai-gpt-4o`. See `litellm/config/fallbacks.json` for all chains.

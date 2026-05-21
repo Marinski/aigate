@@ -23,7 +23,7 @@ Each individual service also exposes its own MCP endpoint directly (routed via n
 | stealthy-auto-browse | `http://localhost:4000/stealthy-auto-browse/mcp/`   |
 | hybrids3             | `http://localhost:4000/storage/mcp/`                |
 | claudebox            | `http://localhost:4000/claudebox/mcp/`              |
-| claudebox-zai        | `http://localhost:4000/claudebox-zai/mcp/`          |
+| pibox-zai            | `http://localhost:4000/pibox-zai/mcp/`              |
 | mcp_tools            | via LiteLLM aggregation only (no direct nginx route)|
 
 ```bash
@@ -140,11 +140,11 @@ claude_run(prompt="task A", workspace="shared")
 claude_run(prompt="task B", workspace="shared")  # 409 if first is still running
 ```
 
-## claudebox_zai (`CLAUDEBOX_ZAI=1`)
+## pibox_zai (`PIBOX_ZAI=1`)
 
-Same tools as above, but backed by GLM models through [z.ai](https://z.ai)'s Anthropic-compatible API. Same workspace capabilities, same file operations, different underlying model. Use this when you want agentic execution without touching your Claude subscription or API key budget.
+[pi-coding-agent](https://github.com/earendil-works/pi-mono) wrapped by [pibox](https://github.com/psyb0t/docker-pibox) and pointed at [z.ai](https://z.ai)'s Anthropic-compatible API (GLM models). Same agentic capabilities and workspace-scoped file operations as `claudebox`, plus a `/files/*` CRUD API. Use this when you want agentic execution without touching your Claude subscription or API key budget.
 
-The z.ai instance routes through a separate claudebox container — workspaces between the two instances are not shared.
+The pibox-zai instance runs in a separate container — workspaces are not shared with claudebox.
 
 ## mcp_tools (auto-enabled with image/TTS/search providers)
 

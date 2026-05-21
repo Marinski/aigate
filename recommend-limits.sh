@@ -51,7 +51,7 @@ if [ -f .env ]; then
     [ "$(_v OLLAMA_CUDA)" = "1" ]   && flag_ollama_cuda=1
     [ "$(_v BROWSER)" = "1" ]       && flag_browser=1
     [ "$(_v CLAUDEBOX)" = "1" ]     && flag_claudebox=1
-    [ "$(_v CLAUDEBOX_ZAI)" = "1" ] && flag_cbzai=1
+    [ "$(_v PIBOX_ZAI)" = "1" ]     && flag_cbzai=1
     [ "$(_v HYBRIDS3)" = "1" ]      && flag_hybrids3=1
     [ "$(_v CLOUDFLARED)" = "1" ]   && flag_cloudflared=1
     [ "$(_v LIBRECHAT)" = "1" ]    && flag_librechat=1
@@ -288,7 +288,7 @@ row "postgres"                      $postgres_mem     $postgres_swap     $postgr
 row "redis"                         $redis_mem        $redis_swap        $redis_cpu
 row "proxq"                         $proxq_mem        $proxq_swap        $proxq_cpu
 [ "$flag_claudebox" = "1" ] && row "claudebox"              $claudebox_mem  $claudebox_swap  $claudebox_cpu
-[ "$flag_cbzai" = "1" ]     && row "claudebox-zai"          $cbzai_mem      $cbzai_swap      $cbzai_cpu
+[ "$flag_cbzai" = "1" ]     && row "pibox-zai"              $cbzai_mem      $cbzai_swap      $cbzai_cpu
 [ "$flag_hybrids3" = "1" ]  && row "hybrids3"               $hybrids3_mem   $hybrids3_swap   $hybrids3_cpu
 if [ "$flag_browser" = "1" ]; then
     row "stealthy-auto-browse-redis"    $sab_redis_mem  $sab_redis_swap  $sab_redis_cpu
@@ -365,9 +365,9 @@ CLAUDEBOX_MEM_LIMIT=$(fmt $claudebox_mem)
 CLAUDEBOX_MEMSWAP_LIMIT=$(fmt $claudebox_swap)
 CLAUDEBOX_CPUS=${claudebox_cpu}
 
-CLAUDEBOX_ZAI_MEM_LIMIT=$(fmt $cbzai_mem)
-CLAUDEBOX_ZAI_MEMSWAP_LIMIT=$(fmt $cbzai_swap)
-CLAUDEBOX_ZAI_CPUS=${cbzai_cpu}
+PIBOX_ZAI_MEM_LIMIT=$(fmt $cbzai_mem)
+PIBOX_ZAI_MEMSWAP_LIMIT=$(fmt $cbzai_swap)
+PIBOX_ZAI_CPUS=${cbzai_cpu}
 
 HYBRIDS3_MEM_LIMIT=$(fmt $hybrids3_mem)
 HYBRIDS3_MEMSWAP_LIMIT=$(fmt $hybrids3_swap)

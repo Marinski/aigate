@@ -1,8 +1,15 @@
 #!/bin/bash
 
+# ── claudebox: gated on CLAUDEBOX=1 ────────────────────────────────────────
+
+_claudebox_enabled() {
+    [ "${CLAUDEBOX:-0}" = "1" ]
+}
+
 # ── claudebox chat completion via litellm ──────────────────────────────────
 
 test_claudebox_chat() {
+    _claudebox_enabled || { echo "  SKIP: CLAUDEBOX=0"; return 0; }
     local out
     out=$(post "$BASE_URL/chat/completions" \
         '{"model":"claudebox-haiku","messages":[{"role":"system","content":"You are a test echo bot. Reply with exactly what is asked, no commentary."},{"role":"user","content":"Reply with exactly: CBOXPONG7742"}]}')
@@ -25,6 +32,7 @@ CLAUDEBOX_DIRECT_CASES=(
 )
 
 test_claudebox_direct_api() {
+    _claudebox_enabled || { echo "  SKIP: CLAUDEBOX=0"; return 0; }
     local entry label path expected
     for entry in "${CLAUDEBOX_DIRECT_CASES[@]}"; do
         IFS='|' read -r label path expected <<< "$entry"
@@ -39,11 +47,10 @@ test_claudebox_direct_api() {
 # ── claudebox file operations via nginx ────────────────────────────────────
 
 test_claudebox_file_ops() {
+    _claudebox_enabled || { echo "  SKIP: CLAUDEBOX=0"; return 0; }
     local test_file="litellm-test-$(date +%s).txt"
     local test_content="test from litellm tests"
-    local auth="-H Authorization:\ Bearer\ $CLAUDEBOX_API_TOKEN"
 
-    # upload
     local code
     code=$(curl -s -o /dev/null -w "%{http_code}" -X PUT \
         "$BASE_URL/claudebox/files/$test_file" \
@@ -51,19 +58,16 @@ test_claudebox_file_ops() {
         -d "$test_content")
     assert_eq "$code" "200" "upload file to claudebox" || return 1
 
-    # download
     local body
     body=$(curl -sf "$BASE_URL/claudebox/files/$test_file" \
         -H "Authorization: Bearer $CLAUDEBOX_API_TOKEN")
     assert_eq "$body" "$test_content" "download file from claudebox" || return 1
 
-    # list
     local list_out
     list_out=$(curl -sf "$BASE_URL/claudebox/files" \
         -H "Authorization: Bearer $CLAUDEBOX_API_TOKEN")
     assert_contains "$list_out" "$test_file" "file in listing" || return 1
 
-    # delete
     code=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE \
         "$BASE_URL/claudebox/files/$test_file" \
         -H "Authorization: Bearer $CLAUDEBOX_API_TOKEN")
@@ -72,19 +76,10 @@ test_claudebox_file_ops() {
     echo "OK: claudebox_file_ops (4 operations)"
 }
 
-# ── claudebox-zai reachable ────────────────────────────────────────────────
-
-test_claudebox_zai_reachable() {
-    local out
-    out=$(curl -sf "$BASE_URL/claudebox-zai/status" \
-        -H "Authorization: Bearer $CLAUDEBOX_ZAI_API_TOKEN" 2>/dev/null)
-    assert_contains "$out" "busyWorkspaces" "claudebox-zai status" || return 1
-    echo "OK: claudebox_zai_reachable"
-}
-
 # ── OpenAI-compatible models endpoint ─────────────────────────────────────
 
 test_claudebox_openai_models() {
+    _claudebox_enabled || { echo "  SKIP: CLAUDEBOX=0"; return 0; }
     local out
     out=$(curl -sf "$BASE_URL/claudebox/openai/v1/models" \
         -H "Authorization: Bearer $CLAUDEBOX_API_TOKEN" 2>/dev/null)
@@ -95,22 +90,9 @@ test_claudebox_openai_models() {
     echo "OK: claudebox_openai_models"
 }
 
-test_claudebox_zai_openai_models() {
-    local out
-    out=$(curl -sf "$BASE_URL/claudebox-zai/openai/v1/models" \
-        -H "Authorization: Bearer $CLAUDEBOX_ZAI_API_TOKEN" 2>/dev/null)
-    assert_contains "$out" '"object":"list"' "claudebox-zai openai models returns list" || return 1
-    assert_contains "$out" '"haiku"' "claudebox-zai openai models has haiku" || return 1
-    assert_contains "$out" '"sonnet"' "claudebox-zai openai models has sonnet" || return 1
-    assert_contains "$out" '"opus"' "claudebox-zai openai models has opus" || return 1
-    echo "OK: claudebox_zai_openai_models"
-}
-
 ALL_TESTS+=(
     test_claudebox_chat
     test_claudebox_direct_api
     test_claudebox_file_ops
-    test_claudebox_zai_reachable
     test_claudebox_openai_models
-    test_claudebox_zai_openai_models
 )

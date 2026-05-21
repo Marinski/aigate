@@ -125,13 +125,13 @@ SEC_CLAUDEBOX_REJECT_CASES=(
     "bad token status|Bearer wrong|/claudebox/status"
     "no auth files|none|/claudebox/files"
     "bad token files|Bearer wrong|/claudebox/files"
-    "no auth zai|none|/claudebox-zai/status"
-    "bad token zai|Bearer wrong|/claudebox-zai/status"
+    "no auth zai|none|/pibox-zai/status"
+    "bad token zai|Bearer wrong|/pibox-zai/status"
 )
 
 SEC_CLAUDEBOX_ALLOW_CASES=(
     "health no auth|none|/claudebox/health|200"
-    "health zai no auth|none|/claudebox-zai/health|200"
+    "health zai no auth|none|/pibox-zai/healthz|200"
 )
 
 test_sec_claudebox_auth() {
@@ -378,7 +378,7 @@ test_sec_health_no_leak() {
     local endpoints=(
         "/health/liveliness"
         "/claudebox/health"
-        "/claudebox-zai/health"
+        "/pibox-zai/healthz"
         "/storage/health"
         "/stealthy-auto-browse/__queue/health"
         "/stealthy-auto-browse/__queue/status"
@@ -403,10 +403,10 @@ test_sec_health_no_leak() {
 
 SEC_CROSS_TOKEN_CASES=(
     "browser token on claudebox|$STEALTHY_AUTO_BROWSE_AUTH_TOKEN|/claudebox/status"
-    "browser token on claudebox-zai|$STEALTHY_AUTO_BROWSE_AUTH_TOKEN|/claudebox-zai/status"
+    "browser token on pibox-zai|$STEALTHY_AUTO_BROWSE_AUTH_TOKEN|/pibox-zai/status"
     "claudebox token on browser|$CLAUDEBOX_API_TOKEN|/stealthy-auto-browse/"
-    "claudebox-zai token on claudebox|$CLAUDEBOX_ZAI_API_TOKEN|/claudebox/status"
-    "claudebox token on claudebox-zai|$CLAUDEBOX_API_TOKEN|/claudebox-zai/status"
+    "pibox-zai token on claudebox|$PIBOX_ZAI_API_TOKEN|/claudebox/status"
+    "claudebox token on pibox-zai|$CLAUDEBOX_API_TOKEN|/pibox-zai/status"
     "hybrids3 token on claudebox|$HYBRIDS3_UPLOADS_KEY|/claudebox/status"
     "hybrids3 token on browser|$HYBRIDS3_UPLOADS_KEY|/stealthy-auto-browse/"
 )
