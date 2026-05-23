@@ -2,6 +2,66 @@
 
 All notable changes to this project are documented here.
 
+## [v2.4.0] — 2026-05-23
+
+**Bump predictalot to v0.2.1 — type-routed API (breaking for callers) + auth on `/v1/<type>/models`.**
+
+Breaking changes for any direct-HTTP or MCP caller of predictalot:
+
+- HTTP: `/predictalot/v1/forecast` and `/predictalot/v1/models` no longer exist. Each forecast modality has its own URL family: `/v1/{univariate,multivariate,covariates/past,covariates/future,covariates,samples}/{forecast,forecast/ensemble,models}`. A model only appears under a type if it implements that modality. **All three sub-paths (`forecast`, `forecast/ensemble`, `models`) require the bearer token** — only `/healthz` is open.
+- MCP: the 7-tool surface (`predictalot-forecast_<model>`, `predictalot-forecast_ensemble`, `predictalot-list_models`) is replaced by a 26-tool surface — `predictalot-forecast_<type>_<model>` (18 cells), `predictalot-forecast_<type>_ensemble` (6 per-type ensembles), `predictalot-list_<type>_models` (6 per-type listings). Tool argument shapes are unchanged for shared fields, but covariate variants add `past_covariates` / `future_covariates` kwargs and samples-type tools take `num_samples` instead of `quantile_levels`.
+
+Migration: replace any `/v1/forecast` call with `/v1/univariate/forecast` (most common case — all five models support univariate). Replace `/v1/models` with `/v1/univariate/models` (or any per-type listing). For MCP, swap `forecast_<model>` for `forecast_univariate_<model>` and `list_models` for `list_univariate_models`.
+
+What's new in v0.2.x:
+- True multivariate forecasting (chronos-2 / moirai-2 / toto-1) — joint per-(series, channel) quantile predictions instead of per-channel univariate calls.
+- Covariate-conditioned forecasting — past covariates (chronos-2, moirai-2), future covariates (chronos-2), and combined past + future (chronos-2).
+- Raw-sample-path forecasting (toto-1, sundial-base-128m) for downstream Monte-Carlo workflows.
+- Per-type ensembles — every type has its own `forecast/ensemble`, parallelizing only the members that actually implement that type.
+- Unauthenticated `/healthz` liveness probe at root.
+- v0.2.1 closes a v0.2.0 information-leak where unauthenticated callers could enumerate installed model slugs + load state + `lastUsedSecsAgo` via the per-type `/models` endpoints; all six `/v1/<type>/models` routes now require the bearer (when auth is configured).
+
+Aigate-side updates:
+- `docker-compose.yml`: bump `predictalot` → `psyb0t/predictalot:v0.2.1` and `predictalot-cuda` → `psyb0t/predictalot:v0.2.1-cuda`. Healthcheck switched from the removed `/v1/models` to the new `/healthz`.
+- `tests/test_predictalot.sh`: rewritten to exercise the new surface — `/v1/univariate/models`, `/v1/multivariate/models` (verifies non-members excluded), `/v1/univariate/forecast` (chronos-2), `/v1/univariate/forecast/ensemble`, non-member-of-type rejection (timesfm-2.5 on `/v1/multivariate/forecast`), and the 26-tool MCP surface.
+- Docs: `README.md`, `docs/usage.md`, `docs/services-reference.md`, `docs/mcp-tools.md`, `docs/testing.md`, and `litellm/config/mcp/predictalot.yaml` description rewritten for the type matrix.
+
+## [v2.3.1] — 2026-05-22
+
+**Revert ollama-cuda `OLLAMA_NUM_PARALLEL` default from 50 back to 1.**
+
+v2.3.0 shipped `OLLAMA_NUM_PARALLEL=50` by default on `ollama-cuda`, with README + `.env.example` framing this as a knob tuned for parallel embedding throughput (qwen3-embed-0.6b). Reading ollama's scheduler after shipping showed `server/sched.go:414-417` hard-pins embedding models to `numParallel=1`:
+
+```go
+// Embedding models should always be loaded with parallel=1
+if req.model.CheckCapabilities(model.CapabilityCompletion) != nil {
+    numParallel = 1
+}
+```
+
+The same file also force-pins `numParallel=1` for `mllama` / `qwen3vl(moe)` / `qwen35(moe)` / `qwen3next` / `lfm2(moe)` / `nemotron_h` architectures. So the 50 default only ever applied to plain chat models — and the documentation explicitly framing it as an embed-throughput knob was wrong.
+
+For callers that actually want parallel embedding throughput in ollama: pass an array to `/api/embed` (or `input: [...]` on `/v1/embeddings`). The runner batches the array in a single forward pass — that's where the speedup lives, not in `NUM_PARALLEL`.
+
+The `pibox` v0.3.1 → v0.7.0 bump that also shipped in v2.3.0 is unaffected and stays.
+
+## [v2.3.0] — 2026-05-22
+
+**Bump psyb0t/pibox v0.3.1 → v0.7.0 (fixes init-marker bug) + bump ollama-cuda NUM_PARALLEL default (reverted in v2.3.1).**
+
+- `pibox-zai` (and `pibox` services in general) — bump `psyb0t/pibox:v0.3.1` → `v0.7.0`. v0.3.1's `init.d` bind-mounted a `.init-done` marker into the config volume, which froze `ANTHROPIC_BASE_URL` at the value seeded on first boot. After bumping `ANTHROPIC_BASE_URL` in `.env`, restarting the container did nothing — pi kept talking to whatever URL was burned in at first boot (in our case `api.anthropic.com` instead of z.ai). v0.3.2+ re-runs the baseurl setup on every boot. We jumped past 0.3.2 to 0.7.0 to pick up unrelated upstream fixes.
+- ollama-cuda — `OLLAMA_NUM_PARALLEL` default bumped 1 → 50. Reverted in v2.3.1 — see that entry for the actual scheduler-pinning constraint that made this misleading.
+
+## [v2.2.1] — 2026-05-21
+
+**Docs sweep for v2.1 / v2.2 services. No code, no config schema, no behaviour changes.**
+
+- `README.md` — intro capability list, resource-management section, usage curl examples, Logs-and-Debugging table, troubleshooting section, and the "Full usage guide" link blurb all now thread predictalot / mailbox / telethon / web-search mentions where the surrounding section was listing capabilities.
+- `docs/usage.md` — four new sections backing the expanded README links: Web search (SearXNG MCP), Time-series forecasting (predictalot), Email gateway (mailbox), Telegram client (telethon). Each shows the direct REST surface plus pointers to the matching MCP tools and the deeper service reference.
+- `docs/testing.md` — "What's Tested" extended with the new predictalot, mailbox, and telethon test suites (and the opt-in mailbox e2e gate).
+- `litellm/config/mcp/mcp.yaml` — aggregator description for `mcp_tools` updated to list `search_web` alongside `generate_image` and `generate_tts` (it had been omitted since the SearXNG integration shipped).
+- `.env.example` — `TELETHON_LOG_LEVEL` documented (was wired in `docker-compose.yml` but missing from the canonical env reference).
+
 ## [v2.2.0] — 2026-05-21
 
 **Add mailbox — IMAP+SMTP gateway.**

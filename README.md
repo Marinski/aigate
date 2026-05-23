@@ -21,7 +21,7 @@ MCP tools across multiple servers. Any model with function calling can invoke th
 - **Web search** — SearXNG self-hosted meta-search (Google, Bing, DuckDuckGo, Wikipedia) via MCP `search_web` tool.
 - **Telegram client** — Telethon at `/telethon/`. Send/read/edit/delete messages, list dialogs, forward, send files from URL, manage group membership. REST API + MCP tools.
 - **Email gateway** — mailbox at `/mailbox/`. Stateless IMAP+SMTP across N accounts from one YAML config — unified inbox, per-account list/search/CRUD, SMTP send. REST API + flat MCP tool set (`mailbox` parameter selects account).
-- **Time-series forecasting** — predictalot at `/predictalot/`. Five foundation forecasters (chronos-2, timesfm-2.5, moirai-2, toto-1, sundial-base-128m) behind one wire shape, plus weighted ensemble. REST API + MCP tools. CPU or CUDA.
+- **Time-series forecasting** — predictalot at `/predictalot/`. Five foundation forecasters (chronos-2, timesfm-2.5, moirai-2, toto-1, sundial-base-128m) across six forecast types (univariate, multivariate, past/future covariates, samples) with per-type weighted ensembles. REST API + 26 MCP tools. CPU or CUDA.
 
 Ask a Groq model to research something and it opens a browser, reads pages, screenshots them, uploads to storage, and comes back with a summary and links. The model decides what tools to use and in what order.
 
@@ -87,7 +87,7 @@ MCP servers (all optional):
   ├─ pibox_zai             — agentic pi-coding-agent via z.ai/GLM (PIBOX_ZAI=1)
   ├─ mcp_tools             — generate_image + generate_tts + search_web (auto-enabled with image/TTS/SearXNG)
   ├─ telethon              — Telegram send/read/edit messages, dialogs, files, group management (TELETHON=1)
-  ├─ predictalot           — time-series forecasting via 5 foundation models + weighted ensemble (PREDICTALOT=1 / PREDICTALOT_CUDA=1)
+  ├─ predictalot           — time-series forecasting via 5 foundation models × 6 type-routed endpoints + per-type ensemble (PREDICTALOT=1 / PREDICTALOT_CUDA=1)
   └─ mailbox               — IMAP+SMTP gateway: inbox, list/search/send across N accounts (MAILBOX=1)
 ```
 
@@ -137,7 +137,7 @@ Default writable locations:
 | **[LibreChat](https://github.com/danny-avila/LibreChat)** _(optional, `LIBRECHAT=1`)_                          | Web UI for LLM interaction at `/librechat/`. Pre-configured with all LiteLLM models and MCP tools. MongoDB-backed conversation storage. Email/password auth — first registered user becomes admin, then set `LIBRECHAT_ALLOW_REGISTRATION=false` and restart. WebSocket streaming. Configurable via `.env` (registration, rate limits, debug logging, JWT secrets).           |
 | **[SearXNG](https://github.com/searxng/searxng)** _(optional, `SEARXNG=1`)_                                    | Self-hosted meta-search engine at `/searxng/`. Aggregates Google, Bing, DuckDuckGo, Wikipedia. No API key needed — runs entirely locally. Also powers the MCP `search_web` tool so any function-calling model can search the web autonomously. Protected by nginx admin auth.                                                                                                 |
 | **[Telethon Plus](https://github.com/psyb0t/docker-telethon-plus)** _(optional, `TELETHON=1`)_                 | Telegram client at `/telethon/`. REST API and MCP server — send/read/edit/delete messages, list dialogs, forward messages, send files from URL, manage group membership. Requires a Telegram API ID/hash and a string session (see [my.telegram.org/apps](https://my.telegram.org/apps)). Bearer token auth.                                                                  |
-| **[predictalot](https://github.com/psyb0t/docker-predictalot)** _(optional, `PREDICTALOT=1` / `PREDICTALOT_CUDA=1`)_ | Foundation time-series forecasting at `/predictalot/`. Five univariate quantile forecasters (chronos-2, timesfm-2.5, moirai-2, toto-1, sundial-base-128m) behind one wire shape, plus weighted ensemble. Direct route (not via LiteLLM); MCP enabled by default. Models lazy-load on first request and auto-unload when idle. CPU and CUDA variants — pick one.            |
+| **[predictalot](https://github.com/psyb0t/docker-predictalot)** _(optional, `PREDICTALOT=1` / `PREDICTALOT_CUDA=1`)_ | Foundation time-series forecasting at `/predictalot/`. Five foundation models (chronos-2, timesfm-2.5, moirai-2, toto-1, sundial-base-128m) routed across six forecast modalities (univariate, multivariate, covariates, samples) with per-type weighted ensembles. Direct route (not via LiteLLM); MCP enabled by default. Models lazy-load on first request and auto-unload when idle. CPU and CUDA variants — pick one. See [docs/services-reference.md](docs/services-reference.md#predictalot-optional-predictalot1-or-predictalot_cuda1) for the type matrix, endpoints, and the 26-tool MCP surface. |
 | **[mailbox](https://github.com/psyb0t/docker-mailbox)** _(optional, `MAILBOX=1`)_                               | Stateless IMAP+SMTP gateway at `/mailbox/`. Drives N email accounts from a single YAML config — unified inbox, per-account list/search/CRUD, SMTP send. MCP enabled by default with a flat tool set (`mailbox` parameter selects account). Holds plaintext creds, so `MAILBOX_CONFIG` must point at a gitignored YAML on the host (template at `mailbox/config.example.yaml`). |
 | **cloudflared** _(optional, `CLOUDFLARED=1`)_                                                                  | Cloudflare Tunnel. Disabled by default — enable with `CLOUDFLARED=1` in `.env`. Runs a quick tunnel (random `*.trycloudflare.com` URL, no account) or a named tunnel (fixed domain, requires config file and credentials).                                                                                                                                                    |
 | **tailscale** _(optional, `TAILSCALE=1`)_                                                                      | Tailscale node running [`tailscale serve`](https://tailscale.com/kb/1242/tailscale-serve). Proxies to nginx on the tailnet only — no public exposure, no port forwarding. Set `TS_AUTHKEY` and `TS_HOSTNAME`, then access aigate at `https://<hostname>.<tailnet>.ts.net` from any tailnet-joined device.                                                                       |
@@ -486,7 +486,8 @@ curl http://localhost:4000/embeddings \
   -d '{"model": "local-ollama-cpu-bge-m3", "input": "your text here"}'
 
 # time-series forecasting (PREDICTALOT=1 / PREDICTALOT_CUDA=1 — direct route, not via LiteLLM)
-curl http://localhost:4000/predictalot/v1/forecast \
+# v0.2.0: type-routed. Pick a type: univariate / multivariate / covariates/{past,future} / covariates / samples
+curl http://localhost:4000/predictalot/v1/univariate/forecast \
   -H "Authorization: Bearer $PREDICTALOT_AUTH_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{

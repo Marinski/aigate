@@ -484,22 +484,38 @@ Telegram client at `/telethon/`. Backed by [docker-telethon-plus](https://github
 
 ## predictalot (optional, `PREDICTALOT=1` or `PREDICTALOT_CUDA=1`)
 
-Foundation time-series forecasting at `/predictalot/`. Backed by [docker-predictalot](https://github.com/psyb0t/docker-predictalot) — one HTTP endpoint, five univariate quantile forecasters (`chronos-2`, `timesfm-2.5`, `moirai-2`, `toto-1`, `sundial-base-128m`) behind an identical wire shape, plus an `/v1/forecast/ensemble` weighted-mean endpoint.
+Foundation time-series forecasting at `/predictalot/`. Backed by [docker-predictalot](https://github.com/psyb0t/docker-predictalot) — five foundation models (`chronos-2`, `timesfm-2.5`, `moirai-2`, `toto-1`, `sundial-base-128m`) exposed via a **type-routed API**. Each forecast modality has its own URL prefix; a model only appears under a type if it implements that modality. Per-type weighted-mean ensembles parallelize across all type members.
 
-Not registered with LiteLLM (no chat/completion surface) — it's accessed directly via nginx. MCP is exposed by default through LiteLLM's `/mcp/` aggregator with seven tools (`predictalot-forecast_chronos_2`, `predictalot-forecast_timesfm_2_5`, `predictalot-forecast_moirai_2`, `predictalot-forecast_toto_1`, `predictalot-forecast_sundial_base_128m`, `predictalot-forecast_ensemble`, `predictalot-list_models`).
+Not registered with LiteLLM (no chat/completion surface) — accessed directly via nginx. MCP is exposed by default through LiteLLM's `/mcp/` aggregator with **26 tools** (one per (type, model) cell + per-type ensemble + per-type listing).
 
-| Endpoint        | URL                                | Auth         |
-| --------------- | ---------------------------------- | ------------ |
-| List models     | `GET /predictalot/v1/models`       | Bearer token |
-| Single forecast | `POST /predictalot/v1/forecast`    | Bearer token |
-| Ensemble        | `POST /predictalot/v1/forecast/ensemble` | Bearer token |
-| MCP (direct)    | `/predictalot/mcp`                 | Bearer token |
-| MCP (aggregated)| `/mcp/` (via LiteLLM master key)   | Master key   |
+### Forecast types
+
+| Type | Base URL | Members | Request shape | Response shape |
+|---|---|---|---|---|
+| univariate | `/v1/univariate` | chronos-2, timesfm-2.5, moirai-2, toto-1, sundial-base-128m | `context: float[series][time]` | quantiles per series |
+| multivariate | `/v1/multivariate` | chronos-2, moirai-2, toto-1 | `context: float[series][channel][time]` | quantiles per (series, channel) |
+| covariates — past only | `/v1/covariates/past` | chronos-2, moirai-2 | univariate target + `pastCovariates` | quantiles per series |
+| covariates — future only | `/v1/covariates/future` | chronos-2 | univariate target + `futureCovariates` | quantiles per series |
+| covariates — past + future | `/v1/covariates` | chronos-2 | univariate target + both | quantiles per series |
+| samples | `/v1/samples` | toto-1, sundial-base-128m | univariate target + `numSamples` | raw sample paths |
+
+Every base URL exposes the same three sub-paths: `<base>/forecast`, `<base>/forecast/ensemble`, `<base>/models`.
+
+### Endpoints
+
+| Endpoint                       | URL                                            | Auth         |
+| ------------------------------ | ---------------------------------------------- | ------------ |
+| Liveness probe                 | `GET  /predictalot/healthz`                    | none (open)  |
+| Per-type model listing         | `GET  /predictalot/v1/<type>/models`           | Bearer token |
+| Per-type single-model forecast | `POST /predictalot/v1/<type>/forecast`         | Bearer token |
+| Per-type weighted ensemble     | `POST /predictalot/v1/<type>/forecast/ensemble`| Bearer token |
+| MCP (direct)                   | `/predictalot/mcp`                             | Bearer token |
+| MCP (aggregated)               | `/mcp/` (via LiteLLM master key)               | Master key   |
 
 ### Quick example
 
 ```bash
-curl -s http://localhost:4000/predictalot/v1/forecast \
+curl -s http://localhost:4000/predictalot/v1/univariate/forecast \
   -H "Authorization: Bearer $PREDICTALOT_AUTH_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -507,9 +523,21 @@ curl -s http://localhost:4000/predictalot/v1/forecast \
     "context": [[10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]],
     "config": {"horizon": 5}
   }' | jq
+
+# weighted ensemble — weight 0 disables a model, omitted entries default to 1
+curl -s http://localhost:4000/predictalot/v1/univariate/forecast/ensemble \
+  -H "Authorization: Bearer $PREDICTALOT_AUTH_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "context": [[10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]],
+    "config": {"horizon": 5},
+    "weights": {"chronos-2": 2.0, "moirai-2": 1.0, "timesfm-2.5": 0}
+  }' | jq
 ```
 
-Models lazy-load on first request (first call to a model downloads ~50-800MB into the mounted models dir, subsequent calls are fast). Idle models are unloaded after `PREDICTALOT_MODEL_IDLE_TIMEOUT` (default 30m).
+The ensemble response carries the weighted-mean forecast plus an `individual` map containing each contributing model's own forecast and applied weight, so dissent / post-processing is possible.
+
+Models lazy-load on first request (each downloads ~50-800MB into the mounted models dir, subsequent calls are fast). Idle models are unloaded after `PREDICTALOT_MODEL_IDLE_TIMEOUT` (default 30m). The Sundial model runs in its own sidecar venv (it pins `transformers==4.40.1` for upstream compatibility) — transparent over the wire.
 
 CPU and CUDA variants are mutually exclusive (both bind the `predictalot` network alias) — pick one. CUDA variant requires nvidia-container-toolkit + `--gpus` configuration on the host.
 

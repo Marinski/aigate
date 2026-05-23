@@ -167,7 +167,7 @@ services:
   # + MCP at /predictalot/mcp. Not registered with LiteLLM (no chat/completion surface).
   predictalot:
     profiles: ["predictalot"]
-    image: psyb0t/predictalot:v0.1.1
+    image: psyb0t/predictalot:v0.2.1
     restart: unless-stopped
     mem_limit: ${PREDICTALOT_MEM_LIMIT:-6g}
     memswap_limit: ${PREDICTALOT_MEMSWAP_LIMIT:-12g}
@@ -186,7 +186,7 @@ services:
     volumes:
       - ${DATA_DIR_PREDICTALOT:-${DATA_DIR:-.data}/predictalot}/models:/models
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/v1/models >/dev/null"]
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/healthz >/dev/null"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -200,7 +200,7 @@ services:
   # predictalot CUDA — GPU variant
   predictalot-cuda:
     profiles: ["predictalot-cuda"]
-    image: psyb0t/predictalot:v0.1.1-cuda
+    image: psyb0t/predictalot:v0.2.1-cuda
     restart: unless-stopped
     mem_limit: ${PREDICTALOT_CUDA_MEM_LIMIT:-12g}
     memswap_limit: ${PREDICTALOT_CUDA_MEMSWAP_LIMIT:-24g}
@@ -226,7 +226,7 @@ services:
               count: all
               capabilities: [gpu]
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/v1/models >/dev/null"]
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/healthz >/dev/null"]
       interval: 30s
       timeout: 10s
       retries: 5

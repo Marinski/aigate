@@ -224,21 +224,32 @@ All chat references accept: `@username`, phone number, `t.me/...` link, or numer
 
 ## predictalot — Time-series forecasting (`PREDICTALOT=1` or `PREDICTALOT_CUDA=1`)
 
-MCP server backed by [docker-predictalot](https://github.com/psyb0t/docker-predictalot). Exposes five univariate quantile forecasters plus a weighted ensemble. Inputs are lists of float series; outputs include a median point forecast and per-quantile arrays.
+MCP server backed by [docker-predictalot](https://github.com/psyb0t/docker-predictalot). Exposes five foundation forecasters across six forecast types: **univariate**, **multivariate**, **covariates_past**, **covariates_future**, **covariates_both**, **samples**. A model only has a tool under a type if it implements that modality (e.g. `timesfm-2.5` only appears under `univariate`; `chronos-2` is the only `covariates_future` member).
+
+**26 tools total**, in three families:
+- `forecast_<type>_<model>` — single-model forecast for a specific (type, model) cell. 18 of these (5+3+2+1+1+2 across types).
+- `forecast_<type>_ensemble` — per-type weighted-mean ensemble across all the type's members. 6 of these.
+- `list_<type>_models` — per-type listing of member slugs + loaded/unloaded status. 6 of these.
+
+Naming convention: model slug dashes/dots become underscores (`sundial-base-128m` → `sundial_base_128m`, `timesfm-2.5` → `timesfm_2_5`). Each `forecast_<type>_<model>` argument shape mirrors the HTTP body flattened to kwargs:
+- quantile types: `context`, `horizon`, `quantile_levels=None`, `context_length=None`, `unload=False` (covariate variants add `past_covariates` and/or `future_covariates`).
+- samples type: `context`, `horizon`, `num_samples=None`, `context_length=None`, `unload=False`.
+- `forecast_<type>_ensemble`: same as the per-model tool minus `model`, plus `weights: dict[str, float] | None = None`. Weight 0 disables that member; omitted entries default to 1.
 
 See [services-reference.md](services-reference.md#predictalot-optional-predictalot1-or-predictalot_cuda1) for per-model trade-offs and accuracy benchmarks.
 
-### Tools
+### Tools by forecast type
 
-| Tool                                  | Description |
-| ------------------------------------- | ----------- |
-| `forecast_chronos_2`                  | Amazon Chronos-2 — fastest on CPU, configurable quantiles |
-| `forecast_timesfm_2_5`                | Google TimesFM 2.5 — decoder-only, compile-time horizon cap |
-| `forecast_moirai_2`                   | Salesforce Moirai-2 — strong on clean seasonal data |
-| `forecast_toto_1`                     | Datadog Toto-1 — strong on noisy/observability series |
-| `forecast_sundial_base_128m`          | Tsinghua Sundial — generative, ICML 2025 Oral |
-| `forecast_ensemble`                   | Weighted mean across multiple models in parallel |
-| `list_models`                         | List available model slugs + their loaded/unloaded status |
+| Type | Per-model tools | Ensemble | Listing |
+|---|---|---|---|
+| univariate | `forecast_univariate_chronos_2`, `forecast_univariate_timesfm_2_5`, `forecast_univariate_moirai_2`, `forecast_univariate_toto_1`, `forecast_univariate_sundial_base_128m` | `forecast_univariate_ensemble` | `list_univariate_models` |
+| multivariate | `forecast_multivariate_chronos_2`, `forecast_multivariate_moirai_2`, `forecast_multivariate_toto_1` | `forecast_multivariate_ensemble` | `list_multivariate_models` |
+| covariates_past | `forecast_covariates_past_chronos_2`, `forecast_covariates_past_moirai_2` | `forecast_covariates_past_ensemble` | `list_covariates_past_models` |
+| covariates_future | `forecast_covariates_future_chronos_2` | `forecast_covariates_future_ensemble` | `list_covariates_future_models` |
+| covariates_both (past + future) | `forecast_covariates_both_chronos_2` | `forecast_covariates_both_ensemble` | `list_covariates_both_models` |
+| samples (raw paths) | `forecast_samples_toto_1`, `forecast_samples_sundial_base_128m` | `forecast_samples_ensemble` | `list_samples_models` |
+
+Via LiteLLM's `/mcp/` aggregator each tool is prefixed `predictalot-` (e.g. `predictalot-forecast_univariate_chronos_2`). Direct calls to `/predictalot/mcp` see the raw, unprefixed names.
 
 ### Common args
 
