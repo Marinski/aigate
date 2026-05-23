@@ -134,7 +134,7 @@ services:
 
   pibox-zai:
     profiles: ["pibox-zai"]
-    image: psyb0t/pibox:v0.3.1
+    image: psyb0t/pibox:v0.7.0
     restart: unless-stopped
     mem_limit: ${PIBOX_ZAI_MEM_LIMIT:-1g}
     memswap_limit: ${PIBOX_ZAI_MEMSWAP_LIMIT:-2g}
@@ -564,7 +564,7 @@ services:
       - OLLAMA_FLASH_ATTENTION=1
       - OLLAMA_KV_CACHE_TYPE=${OLLAMA_CUDA_KV_CACHE:-q8_0}
       - OLLAMA_MAX_LOADED_MODELS=${OLLAMA_CUDA_MAX_LOADED:-1}
-      - OLLAMA_NUM_PARALLEL=${OLLAMA_CUDA_NUM_PARALLEL:-1}
+      - OLLAMA_NUM_PARALLEL=${OLLAMA_CUDA_NUM_PARALLEL:-50}
     volumes:
       - ${DATA_DIR_OLLAMA:-${DATA_DIR:-.data}/ollama}:/root/.ollama
     deploy:
