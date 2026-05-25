@@ -434,7 +434,7 @@ curl http://localhost:4000/audio/transcriptions \
   -F "file=@audio.mp3"
 ```
 
-Transcription models: `groq-whisper-large-v3-turbo`, `groq-whisper-large-v3`, `voxtral-small`, `openai-whisper`, `openai-gpt-4o-transcribe`, `openai-gpt-4o-mini-transcribe`, `local-speaches-whisper-distil-large-v3`, `local-speaches-parakeet-tdt-0.6b`, `local-speaches-cuda-whisper-distil-large-v3` (CUDA), `local-speaches-cuda-parakeet-tdt-0.6b` (CUDA).
+Transcription models: `groq-whisper-large-v3-turbo`, `groq-whisper-large-v3`, `voxtral-small`, `openai-whisper`, `openai-gpt-4o-transcribe`, `openai-gpt-4o-mini-transcribe`, `local-speaches-whisper-distil-large-v3`, `local-speaches-whisper-large-v3-turbo`, `local-speaches-crisper-whisper`, `local-speaches-parakeet-tdt-0.6b`, `local-speaches-parakeet-tdt-0.6b-v3`, `local-speaches-cuda-whisper-distil-large-v3` (CUDA), `local-speaches-cuda-whisper-large-v3-turbo` (CUDA), `local-speaches-cuda-crisper-whisper` (CUDA), `local-speaches-cuda-parakeet-tdt-0.6b` (CUDA), `local-speaches-cuda-parakeet-tdt-0.6b-v3` (CUDA).
 
 ---
 

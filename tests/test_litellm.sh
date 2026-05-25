@@ -143,7 +143,10 @@ fi
 if [ "${SPEACHES_CUDA:-}" = "1" ]; then
     EXPECTED_MODELS+=(
         "local-speaches-cuda-whisper-distil-large-v3"
+        "local-speaches-cuda-whisper-large-v3-turbo"
+        "local-speaches-cuda-crisper-whisper"
         "local-speaches-cuda-parakeet-tdt-0.6b"
+        "local-speaches-cuda-parakeet-tdt-0.6b-v3"
     )
 fi
 
@@ -152,7 +155,10 @@ if [ "${SPEACHES:-}" = "1" ]; then
     EXPECTED_MODELS+=(
         "local-speaches-kokoro-tts"
         "local-speaches-whisper-distil-large-v3"
+        "local-speaches-whisper-large-v3-turbo"
+        "local-speaches-crisper-whisper"
         "local-speaches-parakeet-tdt-0.6b"
+        "local-speaches-parakeet-tdt-0.6b-v3"
     )
 fi
 

@@ -395,6 +395,8 @@ services:
       WHISPER__MODEL: Systran/faster-distil-whisper-large-v3
       WHISPER__INFERENCE_DEVICE: cpu
       WHISPER__COMPUTE_TYPE: int8
+      STT_MODEL_TTL: ${SPEACHES_STT_MODEL_TTL:-600}
+      TTS_MODEL_TTL: ${SPEACHES_TTS_MODEL_TTL:-600}
     volumes:
       - ${DATA_DIR_SPEACHES:-${DATA_DIR:-.data}/speaches}:/home/ubuntu/.cache/huggingface/hub
     healthcheck:
@@ -424,7 +426,10 @@ services:
     entrypoint: >
       sh -c '
         huggingface-cli download Systran/faster-distil-whisper-large-v3 &&
+        huggingface-cli download deepdml/faster-whisper-large-v3-turbo-ct2 &&
+        huggingface-cli download nyrahealth/faster_CrisperWhisper &&
         huggingface-cli download istupakov/parakeet-tdt-0.6b-v2-onnx &&
+        huggingface-cli download istupakov/parakeet-tdt-0.6b-v3-onnx &&
         huggingface-cli download speaches-ai/Kokoro-82M-v1.0-ONNX-int8
       '
     volumes:
@@ -445,6 +450,8 @@ services:
       WHISPER__MODEL: Systran/faster-distil-whisper-large-v3
       WHISPER__INFERENCE_DEVICE: cuda
       WHISPER__COMPUTE_TYPE: float16
+      STT_MODEL_TTL: ${SPEACHES_CUDA_STT_MODEL_TTL:-600}
+      TTS_MODEL_TTL: ${SPEACHES_CUDA_TTS_MODEL_TTL:-600}
     volumes:
       - ${DATA_DIR_SPEACHES:-${DATA_DIR:-.data}/speaches}:/home/ubuntu/.cache/huggingface/hub
     deploy:

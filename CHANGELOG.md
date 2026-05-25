@@ -2,6 +2,31 @@
 
 All notable changes to this project are documented here.
 
+## [v2.6.0] — 2026-05-25
+
+**Add three new local transcription model aliases on Speaches + make idle auto-unload explicit.**
+
+Speaches already supports loading any HuggingFace model whose tags pass its registry filter (ctranslate2 + `automatic-speech-recognition` for whisper; `istupakov/parakeet-tdt-*` prefix for parakeet). Wiring three new ones as first-class LiteLLM aliases so callers can opt in by name without one-off `model=` overrides:
+
+- `local-speaches-whisper-large-v3-turbo` → `deepdml/faster-whisper-large-v3-turbo-ct2`. The "turbo" Whisper from late 2024 — same architecture as large-v3 but with a 4-layer decoder instead of 32, ~8x faster decode at near-identical WER. CT2 weights, drop-in into the existing faster-whisper executor.
+- `local-speaches-crisper-whisper` → `nyrahealth/faster_CrisperWhisper`. Whisper-medium fine-tuned for verbatim transcription that preserves disfluencies, fillers, repetitions, and pause timing instead of cleaning them up. Useful when downstream tooling needs the literal speech (transcript analysis, clinical notes, conversation mining).
+- `local-speaches-parakeet-tdt-0.6b-v3` → `istupakov/parakeet-tdt-0.6b-v3-onnx`. Multilingual upgrade of v2 — covers 25 European languages (vs v2 being English-only). Same 0.6B params + NeMo TDT decoder, same ONNX path through speaches' parakeet executor.
+
+All three exposed on both Speaches CPU (`local-speaches-*`) and Speaches CUDA (`local-speaches-cuda-*`). Existing `local-speaches-whisper-distil-large-v3` and `local-speaches-parakeet-tdt-0.6b` stay — these are additions, nothing removed.
+
+Idle auto-unload made explicit instead of relying on speaches' default-300s:
+
+- `docker-compose.yml`: `speaches` and `speaches-cuda` services now set `STT_MODEL_TTL` / `TTS_MODEL_TTL` via new env vars (`SPEACHES_STT_MODEL_TTL`, `SPEACHES_TTS_MODEL_TTL`, `SPEACHES_CUDA_STT_MODEL_TTL`, `SPEACHES_CUDA_TTS_MODEL_TTL`), default `600` (10 min). The LiteLLM resource manager still proactively unloads on competing-job arrival via `DELETE /api/ps/{model}`; the TTL is a secondary safety net for when no competing job ever arrives.
+- `.env.example`: the four new TTL vars documented under "Speaches tuning".
+
+Other files:
+- `litellm/config/providers/speaches.yaml`, `speaches-cuda.yaml`: three new aliases each.
+- `docker-compose.yml`: `speaches-pull` entrypoint extended to prefetch the three new HuggingFace repos (`deepdml/faster-whisper-large-v3-turbo-ct2`, `nyrahealth/faster_CrisperWhisper`, `istupakov/parakeet-tdt-0.6b-v3-onnx`). CUDA profile shares the same `.data/speaches/` cache — no separate CUDA pull job.
+- `docs/providers.md`: Speaches CPU + CUDA tables extended with the three new rows each, plus a one-line note about the configurable TTL.
+- `docs/usage.md`: transcription-models list extended with the new aliases.
+- `README.md`: local transcription tables (CPU + CUDA) extended with the three new rows each.
+- `tests/test_litellm.sh`: `EXPECTED_MODELS` lists for `SPEACHES=1` and `SPEACHES_CUDA=1` extended with the new aliases so the model-registration test asserts on them.
+
 ## [v2.5.0] — 2026-05-24
 
 **Add OpenAI's new transcription models (`gpt-4o-transcribe` and `gpt-4o-mini-transcribe`) as LiteLLM aliases.**

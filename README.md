@@ -249,10 +249,13 @@ CUDA models run with flash attention and quantized KV cache. See [Resource manag
 
 ### Local transcription (Speaches, CPU — `SPEACHES=1`)
 
-| Model name                               | Description                           |
-| ---------------------------------------- | ------------------------------------- |
-| `local-speaches-whisper-distil-large-v3` | Multilingual, high accuracy           |
-| `local-speaches-parakeet-tdt-0.6b`       | English-only, ~3400× real-time on CPU |
+| Model name                                  | Description                                                                |
+| ------------------------------------------- | -------------------------------------------------------------------------- |
+| `local-speaches-whisper-distil-large-v3`    | Multilingual, distilled, high accuracy                                     |
+| `local-speaches-whisper-large-v3-turbo`     | Multilingual, ~8× faster than large-v3 at near-identical WER               |
+| `local-speaches-crisper-whisper`            | Verbatim — preserves disfluencies, fillers, repetitions, pause timing      |
+| `local-speaches-parakeet-tdt-0.6b`          | English-only, ~3400× real-time on GPU                                      |
+| `local-speaches-parakeet-tdt-0.6b-v3`       | 25 European languages — multilingual upgrade of v2                         |
 
 ### Local text-to-speech (Speaches, CPU — `SPEACHES=1`)
 
@@ -279,10 +282,13 @@ CUDA models run with flash attention and quantized KV cache. See [Resource manag
 
 ### Local transcription (CUDA — `SPEACHES_CUDA=1`)
 
-| Model name                                    | Description                                                    |
-| --------------------------------------------- | -------------------------------------------------------------- |
-| `local-speaches-cuda-whisper-distil-large-v3` | CUDA-accelerated Whisper — same model as CPU, faster inference |
-| `local-speaches-cuda-parakeet-tdt-0.6b`       | CUDA-accelerated Parakeet TDT                                  |
+| Model name                                    | Description                                                              |
+| --------------------------------------------- | ------------------------------------------------------------------------ |
+| `local-speaches-cuda-whisper-distil-large-v3` | CUDA-accelerated Whisper — same model as CPU, faster inference           |
+| `local-speaches-cuda-whisper-large-v3-turbo`  | CUDA, fastest Whisper at near-large WER (~8× faster than large-v3)       |
+| `local-speaches-cuda-crisper-whisper`         | CUDA verbatim Whisper — disfluencies, fillers, repetitions preserved     |
+| `local-speaches-cuda-parakeet-tdt-0.6b`       | CUDA-accelerated Parakeet TDT (English)                                  |
+| `local-speaches-cuda-parakeet-tdt-0.6b-v3`    | CUDA Parakeet TDT, 25 European languages                                 |
 
 ### Local text-to-speech (CUDA — `QWEN_TTS_CUDA=1`)
 

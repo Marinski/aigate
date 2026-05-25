@@ -227,22 +227,28 @@ Requires `nvidia-container-toolkit`. Flash attention + quantized KV cache enable
 
 ## Speaches CPU (local — `SPEACHES=1`)
 
-Transcription and TTS on CPU. Models auto-downloaded and cached in `.data/speaches/`.
+Transcription and TTS on CPU. Models auto-downloaded and cached in `.data/speaches/`. Loaded models auto-unload after 10 min idle (`SPEACHES_STT_MODEL_TTL` / `SPEACHES_TTS_MODEL_TTL`).
 
 | Alias | Model | Mode |
 | ----- | ----- | ---- |
-| `local-speaches-whisper-distil-large-v3` | Systran/faster-distil-whisper-large-v3 | transcription (multilingual) |
-| `local-speaches-parakeet-tdt-0.6b` | istupakov/parakeet-tdt-0.6b-v2-onnx | transcription (English, ~3400× real-time) |
+| `local-speaches-whisper-distil-large-v3` | Systran/faster-distil-whisper-large-v3 | transcription (multilingual, distilled, fast) |
+| `local-speaches-whisper-large-v3-turbo` | deepdml/faster-whisper-large-v3-turbo-ct2 | transcription (multilingual, ~8x faster than large-v3, low WER) |
+| `local-speaches-crisper-whisper` | nyrahealth/faster_CrisperWhisper | transcription (verbatim — preserves disfluencies, fillers, repetitions) |
+| `local-speaches-parakeet-tdt-0.6b` | istupakov/parakeet-tdt-0.6b-v2-onnx | transcription (English, ~3400× real-time on GPU) |
+| `local-speaches-parakeet-tdt-0.6b-v3` | istupakov/parakeet-tdt-0.6b-v3-onnx | transcription (25 European languages, multilingual upgrade of v2) |
 | `local-speaches-kokoro-tts` | speaches-ai/Kokoro-82M-v1.0-ONNX-int8 | TTS — voices: af_heart, af_alloy, am_echo, bm_fable, and many more |
 
 ## Speaches CUDA (local NVIDIA — `SPEACHES_CUDA=1`)
 
-CUDA-accelerated STT. Shares model cache with CPU speaches (`.data/speaches/`) — no extra download.
+CUDA-accelerated STT. Shares model cache with CPU speaches (`.data/speaches/`) — no extra download. Loaded models auto-unload after 10 min idle (`SPEACHES_CUDA_STT_MODEL_TTL` / `SPEACHES_CUDA_TTS_MODEL_TTL`).
 
 | Alias | Model | Mode |
 | ----- | ----- | ---- |
 | `local-speaches-cuda-whisper-distil-large-v3` | Systran/faster-distil-whisper-large-v3 | transcription (CUDA, float16) |
-| `local-speaches-cuda-parakeet-tdt-0.6b` | istupakov/parakeet-tdt-0.6b-v2-onnx | transcription (CUDA) |
+| `local-speaches-cuda-whisper-large-v3-turbo` | deepdml/faster-whisper-large-v3-turbo-ct2 | transcription (CUDA, float16, fastest Whisper at near-large WER) |
+| `local-speaches-cuda-crisper-whisper` | nyrahealth/faster_CrisperWhisper | transcription (CUDA, verbatim — disfluencies preserved) |
+| `local-speaches-cuda-parakeet-tdt-0.6b` | istupakov/parakeet-tdt-0.6b-v2-onnx | transcription (CUDA, English, very fast) |
+| `local-speaches-cuda-parakeet-tdt-0.6b-v3` | istupakov/parakeet-tdt-0.6b-v3-onnx | transcription (CUDA, 25 European languages) |
 
 ## Qwen3 CUDA TTS (local NVIDIA — `QWEN_TTS_CUDA=1`)
 
