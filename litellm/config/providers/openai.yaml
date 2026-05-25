@@ -39,6 +39,20 @@
   model_info:
     mode: audio_transcription
 
+- model_name: openai-gpt-4o-transcribe
+  litellm_params:
+    model: openai/gpt-4o-transcribe
+    api_key: os.environ/OPENAI_API_KEY
+  model_info:
+    mode: audio_transcription
+
+- model_name: openai-gpt-4o-mini-transcribe
+  litellm_params:
+    model: openai/gpt-4o-mini-transcribe
+    api_key: os.environ/OPENAI_API_KEY
+  model_info:
+    mode: audio_transcription
+
 - model_name: openai-tts-1
   litellm_params:
     model: openai/tts-1

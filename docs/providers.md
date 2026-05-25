@@ -171,7 +171,9 @@ Sign up: [platform.openai.com](https://platform.openai.com).
 | `openai-o3-mini`       | o3-mini     | reasoning      |
 | `openai-dall-e-3`      | dall-e-3    | image gen      |
 | `openai-gpt-image-1`   | gpt-image-1 | image gen      |
-| `openai-whisper`       | whisper-1   | transcription  |
+| `openai-whisper`               | whisper-1              | transcription  |
+| `openai-gpt-4o-transcribe`     | gpt-4o-transcribe      | transcription, lower WER than whisper, streaming |
+| `openai-gpt-4o-mini-transcribe`| gpt-4o-mini-transcribe | transcription, cheaper variant of the gpt-4o transcriber |
 | `openai-tts-1`         | tts-1       | text-to-speech |
 | `openai-tts-1-hd`      | tts-1-hd    | text-to-speech |
 

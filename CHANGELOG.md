@@ -2,6 +2,18 @@
 
 All notable changes to this project are documented here.
 
+## [v2.5.0] — 2026-05-24
+
+**Add OpenAI's new transcription models (`gpt-4o-transcribe` and `gpt-4o-mini-transcribe`) as LiteLLM aliases.**
+
+OpenAI shipped two GPT-4o-based transcription models in March 2025 that share the `/v1/audio/transcriptions` endpoint with `whisper-1` but deliver lower WER (especially on accented/noisy/technical English) and support streaming partial chunks. Adding them as first-class aliases so they're usable from any LiteLLM caller without one-off `model=` overrides.
+
+- `litellm/config/providers/openai.yaml`: add `openai-gpt-4o-transcribe` → `openai/gpt-4o-transcribe` and `openai-gpt-4o-mini-transcribe` → `openai/gpt-4o-mini-transcribe`. Both `mode: audio_transcription`. `openai-whisper` (whisper-1) untouched.
+- `docs/providers.md`: append two rows to the OpenAI provider table.
+- `docs/usage.md`: extend the transcription-models list with the new aliases.
+
+Not yet wired into `fallbacks.json` — these are cloud/paid models, callers opt in by name. Output format note: gpt-4o-*-transcribe only support `json` / `text`. If you need `srt` / `vtt` / `verbose_json` (word-level timestamps), stick with `openai-whisper` or a Whisper local/Groq alias.
+
 ## [v2.4.0] — 2026-05-23
 
 **Bump predictalot to v0.2.1 — type-routed API (breaking for callers) + auth on `/v1/<type>/models`.**
