@@ -95,6 +95,8 @@ def active_providers(env):
         ("qwen3-cuda-tts", lambda e: is_flag(e, "QWEN_TTS_CUDA")),
         ("speaches",       lambda e: is_flag(e, "SPEACHES")),
         ("speaches-cuda",  lambda e: is_flag(e, "SPEACHES_CUDA")),
+        ("asr-canary",     lambda e: is_flag(e, "ASR_CANARY")),
+        ("asr-canary-cuda", lambda e: is_flag(e, "ASR_CANARY_CUDA")),
         ("sdcpp",          lambda e: is_flag(e, "SDCPP")),
         ("sdcpp-cuda",     lambda e: is_flag(e, "SDCPP_CUDA")),
     ]
@@ -116,7 +118,7 @@ def active_mcp_servers(env):
         ("mailbox",       lambda e: is_flag(e, "MAILBOX")),
         ("predictalot",   lambda e: is_flag(e, "PREDICTALOT") or is_flag(e, "PREDICTALOT_CUDA")),
         ("mcp",           lambda e: any(
-            is_flag(e, f) for f in ("HUGGINGFACE", "OPENAI", "SPEACHES", "SPEACHES_CUDA", "QWEN_TTS_CUDA", "SDCPP", "SDCPP_CUDA", "SEARXNG")
+            is_flag(e, f) for f in ("HUGGINGFACE", "OPENAI", "SPEACHES", "SPEACHES_CUDA", "ASR_CANARY", "ASR_CANARY_CUDA", "QWEN_TTS_CUDA", "SDCPP", "SDCPP_CUDA", "SEARXNG")
         )),
     ]
     return [name for name, check in checks if check(env)]

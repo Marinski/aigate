@@ -1,0 +1,95 @@
+# syntax=docker/dockerfile:1.7
+#
+# CPU image — Ubuntu 22.04 + CPU PyTorch + nemo_toolkit[asr].
+# Serves only canary-180m-flash (175M params) — bigger models need GPU.
+#
+# Heavy ML deps (torch CPU + nemo_toolkit) installed in the runtime stage
+# from explicit pins. Hash-locking is a follow-up; for now we rely on
+# uv.lock for the lightweight runtime deps and explicit version pins for
+# the ML stack.
+
+FROM python:3.12-slim-bookworm@sha256:d193c6f51a7dbd10395d6328de3a7edb0516fb0608ca138036576f574c3e07d2 AS builder
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    UV_PROJECT_ENVIRONMENT=/opt/venv
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
+        git \
+        curl \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=ghcr.io/astral-sh/uv:0.11.15@sha256:e590846f4776907b254ac0f44b5b380347af5d90d668138ca7938d1b0c2f98d3 /uv /usr/local/bin/uv
+
+WORKDIR /app
+
+# 1) Lightweight runtime deps (fastapi, uvicorn, pydantic, python-multipart).
+COPY pyproject.toml ./
+COPY src ./src
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv venv /opt/venv && \
+    uv pip install --python /opt/venv/bin/python -e .
+
+# 2) Heavy ML deps — CPU torch + nemo_toolkit[asr]. Explicit pins.
+#    See Dockerfile.cuda for pin rationale + open-CVE threat model.
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --python /opt/venv/bin/python --no-config \
+        --extra-index-url https://download.pytorch.org/whl/cpu \
+        --index-strategy unsafe-best-match \
+        "torch==2.9.1+cpu" \
+        "torchaudio==2.9.1+cpu" \
+    && uv pip install --python /opt/venv/bin/python --no-config \
+        "nemo-toolkit[asr]==2.7.3" \
+        "lightning==2.4.0" \
+        "pytorch-lightning==2.4.0" \
+        "transformers==4.57.6" \
+        "huggingface-hub==0.35.3" \
+        "soundfile==0.13.1" \
+        "librosa==0.10.2" \
+        "matplotlib==3.9.2"
+
+# -----------------------------------------------------------------------------
+FROM python:3.12-slim-bookworm@sha256:d193c6f51a7dbd10395d6328de3a7edb0516fb0608ca138036576f574c3e07d2 AS runtime
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PATH="/opt/venv/bin:$PATH" \
+    PYTHONPATH=/app/src \
+    TZ=UTC \
+    ASR_CANARY_HOST=0.0.0.0 \
+    ASR_CANARY_PORT=8000 \
+    ASR_CANARY_DEVICE=cpu \
+    ASR_CANARY_MODELS_FILE=/app/models.json \
+    ASR_CANARY_DATA_DIR=/data \
+    HF_HOME=/data/hf \
+    HF_HUB_OFFLINE=1
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ffmpeg \
+        libsndfile1 \
+        libgomp1 \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd -u 1000 --create-home --shell /bin/bash canary \
+    && mkdir -p /data \
+    && chown canary:canary /data
+
+WORKDIR /app
+
+COPY --from=builder /opt/venv /opt/venv
+COPY --chown=canary:canary src ./src
+COPY --chown=canary:canary pyproject.toml ./
+COPY --chown=canary:canary models-cpu.json /app/models.json
+COPY --chown=canary:canary entrypoint.sh /usr/local/bin/asr-canary-entrypoint
+RUN chmod +x /usr/local/bin/asr-canary-entrypoint
+
+USER canary
+
+EXPOSE 8000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz').status==200 else 1)" || exit 1
+
+ENTRYPOINT ["/usr/local/bin/asr-canary-entrypoint"]

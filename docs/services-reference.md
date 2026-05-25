@@ -338,6 +338,54 @@ Local image generation via [stable-diffusion.cpp](https://github.com/leejet/stab
 
 ---
 
+## asr-canary — Local NeMo Canary STT (optional, `ASR_CANARY=1` or `ASR_CANARY_CUDA=1`)
+
+In-repo Python/FastAPI wrapper around [NVIDIA NeMo Canary](https://huggingface.co/nvidia/canary-180m-flash) ASR models. Exposes an OpenAI-compatible `/v1/audio/transcriptions` endpoint plus speaches-compatible `/api/ps` resource-management endpoints so the LiteLLM CUDA/CPU resource manager can evict it on competing-job arrival. CPU build ships only `canary-180m-flash`; CUDA build ships all three (`canary-180m-flash`, `canary-1b-flash`, `canary-qwen-2.5b`).
+
+Source: `aigate/asr-canary/` (Python 3.12, FastAPI, `nemo-toolkit[asr]`).
+
+### Endpoints (internal — accessed through LiteLLM, not directly via nginx)
+
+| Endpoint | URL | Description |
+| -------- | --- | ----------- |
+| Transcribe | `POST /v1/audio/transcriptions` | OpenAI-compatible multipart upload (`file`, `model`, `language`, `response_format`) |
+| List models | `GET /v1/models` | Configured model_ids from `models.json` / `models-cpu.json` |
+| Loaded models | `GET /api/ps` | Currently loaded backends + `idle_seconds` (speaches-compat) |
+| Unload one | `DELETE /api/ps/{model_id}` | Evict one model from RAM/VRAM (URL-encoded, speaches-compat) |
+| Unload all | `POST /unload` | Evict every loaded backend |
+| Health | `GET /healthz` | Liveness + device + configured model_ids |
+
+### Models
+
+**CPU** (`ASR_CANARY=1`): `canary-180m-flash` (175M params, English, FastConformer encoder).
+
+**CUDA** (`ASR_CANARY_CUDA=1`): `canary-180m-flash`, `canary-1b-flash` (883M, EN/DE/FR/ES + EN↔X translation), `canary-qwen-2.5b` (NeMo SALM — hybrid ASR encoder + Qwen2.5 LLM decoder, English, emits punctuation/casing + can answer audio prompts).
+
+### Behavior
+
+- **Pre-pulled, not lazy**: `asr-canary-pull` / `asr-canary-cuda-pull` containers run on `aigate-public` at startup and download weights via `huggingface-cli` into `${DATA_DIR_ASR_CANARY}/hf`. Main containers run on `aigate-internal` (no egress) and load from the cache on first request.
+- **Lazy load into memory**: weights stay on disk until a transcription request arrives; first request takes the cold-load hit, subsequent requests are warm.
+- **Idle TTL unload**: background sweeper unloads any model idle longer than `ASR_CANARY_MODEL_TTL` (default 600s). Weights stay on disk; next request warm-loads.
+- **CUDA resource manager**: `local-asr-canary-cuda-*` aliases participate in the `cuda-stt` group. A competing CUDA job (LLM, image gen, TTS, other STT) triggers `DELETE /api/ps/{model_id}` for every loaded canary model before the job runs.
+- **CPU resource manager**: `local-asr-canary-180m-flash` participates in the `cpu-stt` group, evicted on competing CPU job arrival.
+- **Audio preprocessing**: any container/codec is ffmpeg-converted to 16 kHz mono WAV before NeMo sees it.
+
+### Environment variables
+
+| Variable | Default | Description |
+| -------- | ------- | ----------- |
+| `ASR_CANARY_MODEL_TTL` / `ASR_CANARY_CUDA_MODEL_TTL` | `600` | Idle seconds before unload (`-1` disables) |
+| `ASR_CANARY_SWEEPER_INTERVAL` / `ASR_CANARY_CUDA_SWEEPER_INTERVAL` | `60` | Idle sweeper poll interval (seconds) |
+| `ASR_CANARY_MAX_UPLOAD_BYTES` / `ASR_CANARY_CUDA_MAX_UPLOAD_BYTES` | `104857600` | Max audio upload size (bytes) |
+| `ASR_CANARY_LOG_LEVEL` / `ASR_CANARY_CUDA_LOG_LEVEL` | `INFO` | Log level |
+| `ASR_CANARY_PRELOAD` / `ASR_CANARY_CUDA_PRELOAD` | _empty_ | Comma-separated model_ids to load into memory at boot |
+| `ASR_CANARY_PREFETCH` / `ASR_CANARY_CUDA_PREFETCH` | _empty_ | Comma-separated model_ids to additionally HF-snapshot at boot inside the main container (pull container already handles the default set) |
+| `ASR_CANARY_MEM_LIMIT` / `ASR_CANARY_CUDA_MEM_LIMIT` | `6g` / `8g` | Container memory limit |
+| `ASR_CANARY_CPUS` / `ASR_CANARY_CUDA_CPUS` | `4.0` | Container CPU limit |
+| `DATA_DIR_ASR_CANARY` | `${DATA_DIR}/asr-canary` | HF cache directory (shared by CPU + CUDA) |
+
+---
+
 ## MCP Tools — Media Generation (auto-enabled)
 
 Auto-enabled when any image or TTS provider is active (HuggingFace, OpenAI, Speaches, SDCPP, CUDA). Runs as an internal service — no direct nginx route, accessed only through LiteLLM's aggregated MCP endpoint at `/mcp/`.

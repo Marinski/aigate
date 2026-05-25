@@ -72,6 +72,16 @@ ifeq ($(strip $(QWEN_TTS_CUDA)),1)
   _PROFILES += qwen3-cuda-tts
 endif
 
+# asr-canary: opt-in with ASR_CANARY=1
+ifeq ($(strip $(ASR_CANARY)),1)
+  _PROFILES += asr-canary
+endif
+
+# asr-canary CUDA: opt-in with ASR_CANARY_CUDA=1
+ifeq ($(strip $(ASR_CANARY_CUDA)),1)
+  _PROFILES += asr-canary-cuda
+endif
+
 # librechat: opt-in with LIBRECHAT=1
 ifeq ($(strip $(LIBRECHAT)),1)
   _PROFILES += librechat
@@ -120,6 +130,12 @@ ifeq ($(strip $(SPEACHES)),1)
   _HAS_MCP := 1
 endif
 ifeq ($(strip $(SPEACHES_CUDA)),1)
+  _HAS_MCP := 1
+endif
+ifeq ($(strip $(ASR_CANARY)),1)
+  _HAS_MCP := 1
+endif
+ifeq ($(strip $(ASR_CANARY_CUDA)),1)
   _HAS_MCP := 1
 endif
 ifeq ($(strip $(QWEN_TTS_CUDA)),1)
@@ -179,7 +195,7 @@ run-bg:
 	docker compose up -d --build --force-recreate
 
 down:
-	COMPOSE_PROFILES=claudebox,pibox-zai,cloudflared,hybrids3,browser,ollama,ollama-cuda,sdcpp,sdcpp-cuda,speaches,speaches-cuda,qwen3-cuda-tts,mcp,librechat,searxng,telethon,tailscale,predictalot,predictalot-cuda,mailbox \
+	COMPOSE_PROFILES=claudebox,pibox-zai,cloudflared,hybrids3,browser,ollama,ollama-cuda,sdcpp,sdcpp-cuda,speaches,speaches-cuda,asr-canary,asr-canary-cuda,qwen3-cuda-tts,mcp,librechat,searxng,telethon,tailscale,predictalot,predictalot-cuda,mailbox \
 		docker compose down --remove-orphans
 
 restart: down run-bg
@@ -220,6 +236,8 @@ help:
 	@echo "  sdcpp-cuda    set SDCPP_CUDA=1 (NVIDIA GPU image generation)"
 	@echo "  speaches      set SPEACHES=1 (CPU TTS + STT)"
 	@echo "  speaches-cuda set SPEACHES_CUDA=1 (NVIDIA GPU STT)"
+	@echo "  asr-canary    set ASR_CANARY=1 (CPU NeMo Canary 180m-flash STT)"
+	@echo "  asr-canary-cuda set ASR_CANARY_CUDA=1 (NVIDIA GPU NeMo Canary STT — all 3 models)"
 	@echo "  qwen-tts-cuda set QWEN_TTS_CUDA=1 (NVIDIA GPU TTS)"
 	@echo "  librechat     set LIBRECHAT=1"
 	@echo "  searxng       set SEARXNG=1 (meta search engine + MCP tool)"

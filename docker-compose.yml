@@ -382,6 +382,133 @@ services:
       - stealthy-auto-browse
       - aigate-internal
 
+  # ── asr-canary (NeMo Canary ASR — CPU 180m-flash) ──────────────────────────
+
+  asr-canary:
+    profiles: ["asr-canary"]
+    build:
+      context: ./asr-canary
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    mem_limit: ${ASR_CANARY_MEM_LIMIT:-6g}
+    memswap_limit: ${ASR_CANARY_MEMSWAP_LIMIT:-12g}
+    cpus: ${ASR_CANARY_CPUS:-4.0}
+    environment:
+      ASR_CANARY_DEVICE: cpu
+      ASR_CANARY_MODEL_TTL: ${ASR_CANARY_MODEL_TTL:-600}
+      ASR_CANARY_SWEEPER_INTERVAL: ${ASR_CANARY_SWEEPER_INTERVAL:-60}
+      ASR_CANARY_MAX_UPLOAD_BYTES: ${ASR_CANARY_MAX_UPLOAD_BYTES:-104857600}
+      ASR_CANARY_LOG_LEVEL: ${ASR_CANARY_LOG_LEVEL:-INFO}
+      ASR_CANARY_PRELOAD: ${ASR_CANARY_PRELOAD:-}
+      ASR_CANARY_PREFETCH: ${ASR_CANARY_PREFETCH:-}
+    volumes:
+      - ${DATA_DIR_ASR_CANARY:-${DATA_DIR:-.data}/asr-canary}:/data
+    depends_on:
+      asr-canary-pull:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz')\""]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - aigate-internal
+
+  # ── asr-canary CUDA (NeMo Canary ASR — all 3 models, GPU) ──────────────────
+
+  asr-canary-cuda:
+    profiles: ["asr-canary-cuda"]
+    build:
+      context: ./asr-canary
+      dockerfile: Dockerfile.cuda
+    restart: unless-stopped
+    mem_limit: ${ASR_CANARY_CUDA_MEM_LIMIT:-8g}
+    memswap_limit: ${ASR_CANARY_CUDA_MEMSWAP_LIMIT:-16g}
+    cpus: ${ASR_CANARY_CUDA_CPUS:-4.0}
+    environment:
+      ASR_CANARY_DEVICE: cuda
+      ASR_CANARY_MODEL_TTL: ${ASR_CANARY_CUDA_MODEL_TTL:-600}
+      ASR_CANARY_SWEEPER_INTERVAL: ${ASR_CANARY_CUDA_SWEEPER_INTERVAL:-60}
+      ASR_CANARY_MAX_UPLOAD_BYTES: ${ASR_CANARY_CUDA_MAX_UPLOAD_BYTES:-104857600}
+      ASR_CANARY_LOG_LEVEL: ${ASR_CANARY_CUDA_LOG_LEVEL:-INFO}
+      ASR_CANARY_PRELOAD: ${ASR_CANARY_CUDA_PRELOAD:-}
+      ASR_CANARY_PREFETCH: ${ASR_CANARY_CUDA_PREFETCH:-}
+    volumes:
+      - ${DATA_DIR_ASR_CANARY:-${DATA_DIR:-.data}/asr-canary}:/data
+    depends_on:
+      asr-canary-cuda-pull:
+        condition: service_completed_successfully
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz')\""]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - aigate-internal
+
+  # ── asr-canary pull (download CPU model into HF cache at start) ─────────────
+
+  asr-canary-pull:
+    profiles: ["asr-canary"]
+    image: python:3.12-slim-bookworm@sha256:d193c6f51a7dbd10395d6328de3a7edb0516fb0608ca138036576f574c3e07d2
+    restart: "no"
+    mem_limit: ${ASR_CANARY_PULL_MEM_LIMIT:-2g}
+    memswap_limit: ${ASR_CANARY_PULL_MEMSWAP_LIMIT:-4g}
+    cpus: ${ASR_CANARY_PULL_CPUS:-2.0}
+    environment:
+      HF_HOME: /data/hf
+    entrypoint:
+      - sh
+      - -c
+      - |
+        set -eu
+        pip install --quiet --no-cache-dir "huggingface-hub==0.35.3"
+        huggingface-cli download --max-workers 1 nvidia/canary-180m-flash
+    volumes:
+      - ${DATA_DIR_ASR_CANARY:-${DATA_DIR:-.data}/asr-canary}:/data
+    networks:
+      - aigate-public
+
+  # ── asr-canary-cuda pull (download all 3 GPU models into HF cache) ─────────
+
+  asr-canary-cuda-pull:
+    profiles: ["asr-canary-cuda"]
+    image: python:3.12-slim-bookworm@sha256:d193c6f51a7dbd10395d6328de3a7edb0516fb0608ca138036576f574c3e07d2
+    restart: "no"
+    mem_limit: ${ASR_CANARY_CUDA_PULL_MEM_LIMIT:-4g}
+    memswap_limit: ${ASR_CANARY_CUDA_PULL_MEMSWAP_LIMIT:-8g}
+    cpus: ${ASR_CANARY_CUDA_PULL_CPUS:-2.0}
+    environment:
+      HF_HOME: /data/hf
+    entrypoint:
+      - sh
+      - -c
+      - |
+        set -eu
+        pip install --quiet --no-cache-dir "huggingface-hub==0.35.3"
+        huggingface-cli download --max-workers 1 nvidia/canary-180m-flash
+        huggingface-cli download --max-workers 1 nvidia/canary-1b-flash
+        huggingface-cli download --max-workers 1 nvidia/canary-qwen-2.5b
+        # SALM (canary-qwen-2.5b) needs the Qwen3-1.7B base tokenizer/LLM at runtime.
+        huggingface-cli download --max-workers 1 Qwen/Qwen3-1.7B
+    volumes:
+      - ${DATA_DIR_ASR_CANARY:-${DATA_DIR:-.data}/asr-canary}:/data
+    networks:
+      - aigate-public
+
   # ── Speaches (local transcription — faster-whisper + Parakeet TDT) ──────────
 
   speaches:
@@ -427,7 +554,6 @@ services:
       sh -c '
         huggingface-cli download Systran/faster-distil-whisper-large-v3 &&
         huggingface-cli download deepdml/faster-whisper-large-v3-turbo-ct2 &&
-        huggingface-cli download nyrahealth/faster_CrisperWhisper &&
         huggingface-cli download istupakov/parakeet-tdt-0.6b-v2-onnx &&
         huggingface-cli download istupakov/parakeet-tdt-0.6b-v3-onnx &&
         huggingface-cli download speaches-ai/Kokoro-82M-v1.0-ONNX-int8

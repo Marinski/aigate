@@ -2,6 +2,37 @@
 
 All notable changes to this project are documented here.
 
+## [v2.7.0] — 2026-05-25
+
+**Add `asr-canary` — in-repo NeMo Canary STT microservice with CPU + CUDA variants.**
+
+speaches' whisper / parakeet stack already covers most STT needs, but NVIDIA's Canary family is a different shape: Canary 180m-flash is the fastest English ASR ever published (~870× real-time on CPU), Canary 1b-flash adds EN↔DE/FR/ES translation, and Canary Qwen-2.5b is a hybrid SALM (speech-LLM) that emits punctuation/casing natively and can answer prompts about the audio. nemo_toolkit's `.transcribe()` / SALM `.generate()` APIs don't map onto faster-whisper, so we wrap them ourselves instead of trying to retrofit speaches.
+
+New microservice at `aigate/asr-canary/` (Python 3.12, FastAPI, `nemo-toolkit[asr]==2.0.0`):
+
+- OpenAI-compatible `/v1/audio/transcriptions` multipart upload (file + model + language + response_format). ffmpeg converts any container/codec to 16 kHz mono WAV before NeMo sees it.
+- Speaches-compatible `/api/ps` resource-management surface — `GET /api/ps`, `DELETE /api/ps/{model_id}` (URL-encoded), `POST /unload` — so the LiteLLM CUDA/CPU resource manager evicts canary models from VRAM/RAM on competing-job arrival using the same `model_id.replace("/", "%2F")` path it already uses for speaches.
+- Per-model `asyncio.Lock` serializes loads + transcribes. Background sweeper unloads any backend idle longer than `ASR_CANARY_MODEL_TTL` (default 600s). Weights stay on disk; next request warm-loads.
+- Optional `ASR_CANARY_PRELOAD` (load into RAM/VRAM at boot) and `ASR_CANARY_PREFETCH` (HF snapshot at boot inside the main container) as comma-separated model_ids.
+
+Wiring:
+
+- `docker-compose.yml`: `asr-canary` (CPU, builds `aigate/asr-canary/Dockerfile`, profile `asr-canary`) + `asr-canary-cuda` (CUDA, builds `Dockerfile.cuda`, profile `asr-canary-cuda`). Both on `aigate-internal` only — main containers have no internet egress at runtime. Two pull sidecars (`asr-canary-pull`, `asr-canary-cuda-pull`) on `aigate-public` run `huggingface-cli download` at startup, mount the same `${DATA_DIR_ASR_CANARY:-${DATA_DIR}/asr-canary}:/data` (HF cache shared between CPU + CUDA — overlapping 180m-flash isn't re-downloaded). Speaches-pattern `depends_on: service_completed_successfully` makes the main containers boot after weights are on disk.
+- `litellm/config/providers/asr-canary.yaml` + `asr-canary-cuda.yaml`: `local-asr-canary-180m-flash` (CPU); `local-asr-canary-cuda-180m-flash`, `local-asr-canary-cuda-1b-flash`, `local-asr-canary-cuda-qwen-2.5b` (CUDA). All `mode: audio_transcription`.
+- `litellm/build-config.py`: `asr-canary` / `asr-canary-cuda` registered as activatable providers; `ASR_CANARY` / `ASR_CANARY_CUDA` count as MCP-trigger flags.
+- `litellm/callbacks/resource_manager.py`: canary aliases registered as STT models. The single `cuda-stt` / `cpu-stt` group was **split** into `cuda-stt-speaches` + `cuda-stt-canary` (and CPU twins). speaches and asr-canary now compete as separate groups → each evicts the other on incoming jobs. Within each service the wrapper handles its own intra-service eviction. Speaches model lists also extended for the v2.6.0 additions (`whisper-large-v3-turbo`, `parakeet-tdt-0.6b-v3`) that were missed at the time.
+- `litellm/callbacks/resource_manager.py`: monkey-patches `OpenAIWhisperAudioTranscriptionConfig.transform_audio_transcription_request` at module import to skip LiteLLM's unconditional `response_format` → `verbose_json` rewrite for parakeet-class models. Speaches' parakeet executor refuses `verbose_json`; the patch lets the client's chosen `response_format` (`json` / `text`) reach speaches untouched. Whisper/CT2 backends still get the original rewrite (they need `verbose_json` for duration extraction).
+- **Dropped `local-speaches-crisper-whisper` / `local-speaches-cuda-crisper-whisper`.** The `nyrahealth/faster_CrisperWhisper` repo is the CT2 conversion but its HF model card declares no `library_name: ctranslate2` and no matching tag, so speaches' `passes_filter` rejects it with `404 Model … is not supported`. No alternate ctranslate2-tagged CrisperWhisper repo exists on HF. Removed from `litellm/config/providers/speaches{,-cuda}.yaml`, `litellm/callbacks/resource_manager.py` (groups + speaches model lists), `docker-compose.yml` pull job, `tests/test_litellm.sh`, `README.md`, `docs/usage.md`, `docs/providers.md`.
+- `Makefile`: `ASR_CANARY=1` → `asr-canary` profile, `ASR_CANARY_CUDA=1` → `asr-canary-cuda` profile. Both count as MCP triggers (so `mcp` profile activates). `make down` includes both profiles in the kill list. `make help` lists both.
+- `.env.example`: new `ASR_CANARY` / `ASR_CANARY_CUDA` flags, `DATA_DIR_ASR_CANARY` (shared CPU+CUDA dir, ~700MB CPU / ~14GB CUDA), and the full tuning surface (`ASR_CANARY_MODEL_TTL`, `ASR_CANARY_SWEEPER_INTERVAL`, `ASR_CANARY_MAX_UPLOAD_BYTES`, `ASR_CANARY_LOG_LEVEL`, `ASR_CANARY_PRELOAD`, `ASR_CANARY_PREFETCH` — each with a `_CUDA_` twin).
+- `README.md`: ASCII stack diagram lists asr-canary CPU + CUDA; services-overview table has new rows; data directories table mentions the shared `.data/asr-canary/`; transcription-models tables (CPU + CUDA) have a section per variant.
+- `docs/providers.md`: new `asr-canary CPU` + `asr-canary CUDA` provider sections with alias → HF repo → mode tables.
+- `docs/services-reference.md`: new `asr-canary` service block with endpoint table, model list per variant, behavior notes (pre-pulled weights, lazy memory load, idle TTL, resource-manager integration, ffmpeg preprocessing), and environment-variable table.
+- `docs/usage.md`: transcription-models list extended with the four new aliases.
+- `docs/testing.md`: new asr-canary row noting `/healthz`, `/v1/models`, `/api/ps`, `DELETE /api/ps/{model}`, `POST /unload` coverage.
+- `tests/test_asr_canary.sh`: exec-through-litellm into the internal-only `asr-canary` / `asr-canary-cuda` service (`docker compose exec litellm curl ...`) for the five endpoint checks above; CUDA variant additionally asserts 1b-flash + qwen-2.5b in `/v1/models`.
+- `tests/test_litellm.sh`: `EXPECTED_MODELS` gets `local-asr-canary-180m-flash` under `ASR_CANARY=1` and three `local-asr-canary-cuda-*` aliases under `ASR_CANARY_CUDA=1`.
+
 ## [v2.6.0] — 2026-05-25
 
 **Add three new local transcription model aliases on Speaches + make idle auto-unload explicit.**

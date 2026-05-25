@@ -72,6 +72,8 @@ nginx :4000                                          ┌────────
                                   ├─ Ollama CUDA        (local, NVIDIA, OLLAMA_CUDA=1)
                                   ├─ Speaches CPU       (local, transcription + TTS, SPEACHES=1)
                                   ├─ Speaches CUDA      (local, CUDA STT, SPEACHES_CUDA=1)
+                                  ├─ asr-canary CPU     (local, NeMo Canary STT, ASR_CANARY=1)
+                                  ├─ asr-canary CUDA    (local, NVIDIA, NeMo Canary STT, ASR_CANARY_CUDA=1)
                                   ├─ Qwen3 CUDA TTS     (local, CUDA voice-cloning, QWEN_TTS_CUDA=1)
                                   ├─ sd.cpp CPU         (local, image gen, SDCPP=1)
                                   ├─ sd.cpp CUDA        (local, image gen, SDCPP_CUDA=1)
@@ -105,6 +107,7 @@ Default writable locations:
 | `.data/nginx/`                               | nginx-auth-init              | Generated htpasswd (from `LITELLM_UI_BASIC_AUTH`)                                          |
 | `.data/ollama/`                              | ollama, ollama-cuda          | Downloaded model weights (shared — CPU and CUDA instances read the same blobs)             |
 | `.data/speaches/`                            | speaches, speaches-cuda      | Downloaded Whisper and Parakeet model weights (HuggingFace cache, shared between CPU/CUDA) |
+| `.data/asr-canary/`                          | asr-canary, asr-canary-cuda  | NeMo Canary model weights (HuggingFace cache, shared between CPU/CUDA — CPU pull fetches 180m-flash only, CUDA pull fetches all 3) |
 | `.data/qwen3-tts/`                           | qwen3-cuda-tts               | Downloaded Qwen3-TTS model weights (HuggingFace cache)                                     |
 | `.data/sdcpp/models/`                        | sdcpp, sdcpp-cuda            | Downloaded stable-diffusion model weights (shared between CPU and CUDA)                    |
 | `.data/librechat/`                           | librechat, librechat-mongodb | Conversation data (MongoDB), file uploads                                                  |
@@ -130,6 +133,8 @@ Default writable locations:
 | **Ollama CUDA** _(optional, `OLLAMA_CUDA=1`)_                                                                  | Local NVIDIA GPU inference. Runs all CPU models on GPU plus: qwen3:8b, qwen3:30b-a3b (MoE generalist), qwen2.5vl:7b (vision-language), gemma4:e4b, qwen2.5-coder:7b, deepseek-coder-v2:16b, llama3.1:8b, qwen3-abliterated:16b, gemma4-abliterated:e4b (uncensored vision), deepseek-r1:8b, deepseek-r1:14b (R1-Distill-Qwen-14B), phi4-reasoning:plus (math/reasoning specialist). Flash attention and KV cache enabled. Shares model storage with CPU ollama — no duplicate downloads. Requires `nvidia-container-toolkit`.         |
 | **Speaches** _(optional, `SPEACHES=1`)_                                                                        | Local CPU audio via [speaches-ai/speaches](https://github.com/speaches-ai/speaches). Transcription: `faster-distil-whisper-large-v3` (multilingual) and `parakeet-tdt-0.6b-v2` (English, ~3400× real-time on CPU). Text-to-speech: `Kokoro-82M` int8 (high-quality, English+Chinese-leaning) plus 17 curated Piper TTS models spanning 16 languages. Multi-speaker piper models (LibriTTS English-US with 904 speakers, VCTK English-UK with 109, MLS-FR/NL multi-speaker, Swedish NST) expose individual speakers via the OpenAI `voice` field; single-speaker models ignore `voice`. All lazy-downloaded on first request. Models cached in `.data/speaches/`.                                                     |
 | **Speaches CUDA** _(optional, `SPEACHES_CUDA=1`)_                                                              | CUDA-accelerated STT via speaches — Whisper-distil-large-v3 and Parakeet-TDT-0.6b. Uses the same model cache as CPU speaches. Shares `.data/speaches/` — no separate download. Requires `nvidia-container-toolkit`.                                                                                                                                                            |
+| **asr-canary CPU** _(optional, `ASR_CANARY=1`)_                                                                | NVIDIA NeMo Canary STT served by an in-repo FastAPI wrapper (`aigate/asr-canary/`). CPU build ships `canary-180m-flash` (175M, English). Weights pre-pulled by `asr-canary-pull` into `.data/asr-canary/`, served offline by the main container. Loaded models auto-unload after `ASR_CANARY_MODEL_TTL` (default 10 min). |
+| **asr-canary CUDA** _(optional, `ASR_CANARY_CUDA=1`)_                                                          | CUDA-accelerated NeMo Canary STT — all three sizes: `canary-180m-flash` (English), `canary-1b-flash` (EN/DE/FR/ES + EN↔X translation), `canary-qwen-2.5b` (hybrid SALM, English, emits punctuation + answers audio prompts). Shares `.data/asr-canary/` with the CPU variant. Requires `nvidia-container-toolkit`. |
 | **Qwen3 CUDA TTS** _(optional, `QWEN_TTS_CUDA=1`)_                                                             | CUDA-accelerated TTS via [faster-qwen3-tts](https://github.com/andimarafioti/faster-qwen3-tts). Runs `Qwen3-TTS-12Hz-0.6B-Base` with CUDA graphs. Voice cloning via reference audio. Models cached in `.data/qwen3-tts/`. Requires `nvidia-container-toolkit`.                                                                                                                |
 | **sd.cpp CPU** _(optional, `SDCPP=1`)_                                                                         | Local CPU image generation via [stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp). Go wrapper with OpenAI-compatible `/v1/images/generations` endpoint, model hot-swap, idle timeout auto-unload. Models: sd-turbo, sdxl-turbo. Models cached in `.data/sdcpp/models/`.                                                                                   |
 | **sd.cpp CUDA** _(optional, `SDCPP_CUDA=1`)_                                                                   | CUDA-accelerated image generation via stable-diffusion.cpp. Same wrapper as CPU with CUDA backend. Models: sd-turbo, sdxl-turbo, sdxl-lightning, flux-schnell, juggernaut-xi. Non-blocking — rejects concurrent requests with 503 instead of queuing (resource manager handles scheduling). Requires `nvidia-container-toolkit`.                                              |
@@ -247,13 +252,26 @@ CUDA models run with flash attention and quantized KV cache. See [Resource manag
 | `local-ollama-cuda-bge-m3`                 | Text embeddings — long docs, multilingual (8192 ctx)             | ~570MB |
 | `local-ollama-cuda-qwen3-embed-0.6b`       | Text embeddings — modern, efficient                              | ~500MB |
 
+### Local transcription (asr-canary, CPU — `ASR_CANARY=1`)
+
+| Model name                       | Description                                                          |
+| -------------------------------- | -------------------------------------------------------------------- |
+| `local-asr-canary-180m-flash`    | NeMo Canary 180M flash — English-only, very fast on CPU              |
+
+### Local transcription (asr-canary, CUDA — `ASR_CANARY_CUDA=1`)
+
+| Model name                          | Description                                                            |
+| ----------------------------------- | ---------------------------------------------------------------------- |
+| `local-asr-canary-cuda-180m-flash`  | NeMo Canary 180M flash — English-only, ASR (CUDA)                      |
+| `local-asr-canary-cuda-1b-flash`    | NeMo Canary 1B flash — EN/DE/FR/ES, with EN↔X translation (CUDA)       |
+| `local-asr-canary-cuda-qwen-2.5b`   | NeMo Canary Qwen 2.5B — hybrid ASR+LLM (English, CUDA)                 |
+
 ### Local transcription (Speaches, CPU — `SPEACHES=1`)
 
 | Model name                                  | Description                                                                |
 | ------------------------------------------- | -------------------------------------------------------------------------- |
 | `local-speaches-whisper-distil-large-v3`    | Multilingual, distilled, high accuracy                                     |
 | `local-speaches-whisper-large-v3-turbo`     | Multilingual, ~8× faster than large-v3 at near-identical WER               |
-| `local-speaches-crisper-whisper`            | Verbatim — preserves disfluencies, fillers, repetitions, pause timing      |
 | `local-speaches-parakeet-tdt-0.6b`          | English-only, ~3400× real-time on GPU                                      |
 | `local-speaches-parakeet-tdt-0.6b-v3`       | 25 European languages — multilingual upgrade of v2                         |
 
@@ -286,7 +304,6 @@ CUDA models run with flash attention and quantized KV cache. See [Resource manag
 | --------------------------------------------- | ------------------------------------------------------------------------ |
 | `local-speaches-cuda-whisper-distil-large-v3` | CUDA-accelerated Whisper — same model as CPU, faster inference           |
 | `local-speaches-cuda-whisper-large-v3-turbo`  | CUDA, fastest Whisper at near-large WER (~8× faster than large-v3)       |
-| `local-speaches-cuda-crisper-whisper`         | CUDA verbatim Whisper — disfluencies, fillers, repetitions preserved     |
 | `local-speaches-cuda-parakeet-tdt-0.6b`       | CUDA-accelerated Parakeet TDT (English)                                  |
 | `local-speaches-cuda-parakeet-tdt-0.6b-v3`    | CUDA Parakeet TDT, 25 European languages                                 |
 

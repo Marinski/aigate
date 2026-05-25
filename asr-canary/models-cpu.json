@@ -1,0 +1,12 @@
+{
+  "models": {
+    "canary-180m-flash": {
+      "repo": "nvidia/canary-180m-flash",
+      "executor": "multitask",
+      "default_source_lang": "en",
+      "default_target_lang": "en",
+      "default_task": "asr",
+      "languages": ["en"]
+    }
+  }
+}

@@ -233,7 +233,6 @@ Transcription and TTS on CPU. Models auto-downloaded and cached in `.data/speach
 | ----- | ----- | ---- |
 | `local-speaches-whisper-distil-large-v3` | Systran/faster-distil-whisper-large-v3 | transcription (multilingual, distilled, fast) |
 | `local-speaches-whisper-large-v3-turbo` | deepdml/faster-whisper-large-v3-turbo-ct2 | transcription (multilingual, ~8x faster than large-v3, low WER) |
-| `local-speaches-crisper-whisper` | nyrahealth/faster_CrisperWhisper | transcription (verbatim — preserves disfluencies, fillers, repetitions) |
 | `local-speaches-parakeet-tdt-0.6b` | istupakov/parakeet-tdt-0.6b-v2-onnx | transcription (English, ~3400× real-time on GPU) |
 | `local-speaches-parakeet-tdt-0.6b-v3` | istupakov/parakeet-tdt-0.6b-v3-onnx | transcription (25 European languages, multilingual upgrade of v2) |
 | `local-speaches-kokoro-tts` | speaches-ai/Kokoro-82M-v1.0-ONNX-int8 | TTS — voices: af_heart, af_alloy, am_echo, bm_fable, and many more |
@@ -246,9 +245,26 @@ CUDA-accelerated STT. Shares model cache with CPU speaches (`.data/speaches/`) �
 | ----- | ----- | ---- |
 | `local-speaches-cuda-whisper-distil-large-v3` | Systran/faster-distil-whisper-large-v3 | transcription (CUDA, float16) |
 | `local-speaches-cuda-whisper-large-v3-turbo` | deepdml/faster-whisper-large-v3-turbo-ct2 | transcription (CUDA, float16, fastest Whisper at near-large WER) |
-| `local-speaches-cuda-crisper-whisper` | nyrahealth/faster_CrisperWhisper | transcription (CUDA, verbatim — disfluencies preserved) |
 | `local-speaches-cuda-parakeet-tdt-0.6b` | istupakov/parakeet-tdt-0.6b-v2-onnx | transcription (CUDA, English, very fast) |
 | `local-speaches-cuda-parakeet-tdt-0.6b-v3` | istupakov/parakeet-tdt-0.6b-v3-onnx | transcription (CUDA, 25 European languages) |
+
+## asr-canary CPU (local — `ASR_CANARY=1`)
+
+NVIDIA NeMo Canary STT served by an in-repo Python/FastAPI wrapper (`aigate/asr-canary/`). OpenAI-compatible `/v1/audio/transcriptions` endpoint. CPU build ships **only** `canary-180m-flash` (175M params, English) — the 1B and Qwen-2.5B sizes are GPU-only. Weights downloaded once by `asr-canary-pull` into `.data/asr-canary/` then served offline. Loaded models auto-unload after `ASR_CANARY_MODEL_TTL` seconds (default 600).
+
+| Alias | Model | Mode |
+| ----- | ----- | ---- |
+| `local-asr-canary-180m-flash` | nvidia/canary-180m-flash | transcription (English, ~870x real-time on CPU, FastConformer encoder) |
+
+## asr-canary CUDA (local NVIDIA — `ASR_CANARY_CUDA=1`)
+
+CUDA-accelerated NeMo Canary, all three sizes. Weights pulled by `asr-canary-cuda-pull` into the shared `.data/asr-canary/` cache (same dir as the CPU variant — overlapping models are not re-downloaded). Loaded models auto-unload after `ASR_CANARY_CUDA_MODEL_TTL` seconds (default 600). The LiteLLM resource manager evicts these from VRAM whenever a competing CUDA job (LLM / image / TTS / other STT) arrives.
+
+| Alias | Model | Mode |
+| ----- | ----- | ---- |
+| `local-asr-canary-cuda-180m-flash` | nvidia/canary-180m-flash | transcription (CUDA, English) |
+| `local-asr-canary-cuda-1b-flash` | nvidia/canary-1b-flash | transcription (CUDA, EN/DE/FR/ES, plus EN↔X translation) |
+| `local-asr-canary-cuda-qwen-2.5b` | nvidia/canary-qwen-2.5b | transcription (CUDA, English, NeMo SALM hybrid ASR+LLM — emits punctuation/casing + can answer prompts about the audio) |
 
 ## Qwen3 CUDA TTS (local NVIDIA — `QWEN_TTS_CUDA=1`)
 

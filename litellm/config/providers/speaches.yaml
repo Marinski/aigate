@@ -14,14 +14,6 @@
   model_info:
     mode: audio_transcription
 
-- model_name: local-speaches-crisper-whisper
-  litellm_params:
-    model: openai/nyrahealth/faster_CrisperWhisper
-    api_base: http://speaches:8000/v1
-    api_key: none
-  model_info:
-    mode: audio_transcription
-
 - model_name: local-speaches-parakeet-tdt-0.6b
   litellm_params:
     model: openai/istupakov/parakeet-tdt-0.6b-v2-onnx

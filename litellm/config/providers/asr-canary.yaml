@@ -1,0 +1,7 @@
+- model_name: local-asr-canary-180m-flash
+  litellm_params:
+    model: openai/canary-180m-flash
+    api_base: http://asr-canary:8000/v1
+    api_key: none
+  model_info:
+    mode: audio_transcription

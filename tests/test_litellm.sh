@@ -144,7 +144,6 @@ if [ "${SPEACHES_CUDA:-}" = "1" ]; then
     EXPECTED_MODELS+=(
         "local-speaches-cuda-whisper-distil-large-v3"
         "local-speaches-cuda-whisper-large-v3-turbo"
-        "local-speaches-cuda-crisper-whisper"
         "local-speaches-cuda-parakeet-tdt-0.6b"
         "local-speaches-cuda-parakeet-tdt-0.6b-v3"
     )
@@ -156,9 +155,24 @@ if [ "${SPEACHES:-}" = "1" ]; then
         "local-speaches-kokoro-tts"
         "local-speaches-whisper-distil-large-v3"
         "local-speaches-whisper-large-v3-turbo"
-        "local-speaches-crisper-whisper"
         "local-speaches-parakeet-tdt-0.6b"
         "local-speaches-parakeet-tdt-0.6b-v3"
+    )
+fi
+
+# asr-canary CPU models — only expected when ASR_CANARY=1
+if [ "${ASR_CANARY:-}" = "1" ]; then
+    EXPECTED_MODELS+=(
+        "local-asr-canary-180m-flash"
+    )
+fi
+
+# asr-canary CUDA models — only expected when ASR_CANARY_CUDA=1
+if [ "${ASR_CANARY_CUDA:-}" = "1" ]; then
+    EXPECTED_MODELS+=(
+        "local-asr-canary-cuda-180m-flash"
+        "local-asr-canary-cuda-1b-flash"
+        "local-asr-canary-cuda-qwen-2.5b"
     )
 fi
 

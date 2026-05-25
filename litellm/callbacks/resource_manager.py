@@ -9,16 +9,22 @@ Enforces two things:
    on the same hardware are told to free VRAM/RAM.
 
 Groups (CUDA):
-  cuda-llm : local-ollama-cuda-* models
-  cuda-img : local-sdcpp-cuda-* (sd.cpp image generation)
-  cuda-tts : local-qwen3-cuda-tts
-  cuda-stt : local-speaches-cuda-*
+  cuda-llm          : local-ollama-cuda-* models
+  cuda-img          : local-sdcpp-cuda-* (sd.cpp image generation)
+  cuda-tts          : local-qwen3-cuda-tts
+  cuda-stt-speaches : local-speaches-cuda-*
+  cuda-stt-canary   : local-asr-canary-cuda-*
 
 Groups (CPU):
-  cpu-llm : local-ollama-cpu-* models   (unload frees RAM)
-  cpu-img : local-sdcpp-cpu-* (sd.cpp image generation)
-  cpu-tts : local-speaches-kokoro-tts
-  cpu-stt : local-speaches-whisper-*, local-speaches-parakeet-*
+  cpu-llm           : local-ollama-cpu-* models   (unload frees RAM)
+  cpu-img           : local-sdcpp-cpu-* (sd.cpp image generation)
+  cpu-tts           : local-speaches-kokoro-tts
+  cpu-stt-speaches  : local-speaches-whisper-*, local-speaches-parakeet-*
+  cpu-stt-canary    : local-asr-canary-*
+
+The two STT services are split into separate groups so they evict each
+other (both compete for the same VRAM/RAM). Within each service, the
+wrapper handles its own intra-service eviction.
 
 Speaches unloading uses DELETE /api/ps/{model_id} which evicts the model
 from memory but keeps it on disk — next request auto-reloads it.
@@ -45,19 +51,43 @@ _CUDA_IMG_PREFIX = "local-sdcpp-cuda-"
 _CPU_IMG_PREFIX = "local-sdcpp-cpu-"
 
 _CUDA_TTS = {"local-qwen3-cuda-tts"}
-_CUDA_STT = {
+_CUDA_STT_SPEACHES = {
     "local-speaches-cuda-whisper-distil-large-v3",
+    "local-speaches-cuda-whisper-large-v3-turbo",
     "local-speaches-cuda-parakeet-tdt-0.6b",
+    "local-speaches-cuda-parakeet-tdt-0.6b-v3",
+}
+_CUDA_STT_CANARY = {
+    "local-asr-canary-cuda-180m-flash",
+    "local-asr-canary-cuda-1b-flash",
+    "local-asr-canary-cuda-qwen-2.5b",
 }
 
 _CPU_TTS = {"local-speaches-kokoro-tts"}
-_CPU_STT = {
+_CPU_STT_SPEACHES = {
     "local-speaches-whisper-distil-large-v3",
+    "local-speaches-whisper-large-v3-turbo",
     "local-speaches-parakeet-tdt-0.6b",
+    "local-speaches-parakeet-tdt-0.6b-v3",
+}
+_CPU_STT_CANARY = {
+    "local-asr-canary-180m-flash",
 }
 
-_ALL_CUDA_GROUPS = {"cuda-llm", "cuda-img", "cuda-tts", "cuda-stt"}
-_ALL_CPU_GROUPS = {"cpu-llm", "cpu-img", "cpu-tts", "cpu-stt"}
+_ALL_CUDA_GROUPS = {
+    "cuda-llm",
+    "cuda-img",
+    "cuda-tts",
+    "cuda-stt-speaches",
+    "cuda-stt-canary",
+}
+_ALL_CPU_GROUPS = {
+    "cpu-llm",
+    "cpu-img",
+    "cpu-tts",
+    "cpu-stt-speaches",
+    "cpu-stt-canary",
+}
 
 
 def _get_group(model: str) -> Optional[str]:
@@ -71,12 +101,16 @@ def _get_group(model: str) -> Optional[str]:
         return "cpu-img"
     if model in _CUDA_TTS:
         return "cuda-tts"
-    if model in _CUDA_STT:
-        return "cuda-stt"
+    if model in _CUDA_STT_SPEACHES:
+        return "cuda-stt-speaches"
+    if model in _CUDA_STT_CANARY:
+        return "cuda-stt-canary"
     if model in _CPU_TTS:
         return "cpu-tts"
-    if model in _CPU_STT:
-        return "cpu-stt"
+    if model in _CPU_STT_SPEACHES:
+        return "cpu-stt-speaches"
+    if model in _CPU_STT_CANARY:
+        return "cpu-stt-canary"
     return None
 
 
@@ -174,14 +208,30 @@ _SPEACHES_CPU_URL = "http://speaches:8000"
 # HuggingFace model IDs loaded by each speaches instance
 _SPEACHES_CUDA_STT_MODELS = [
     "Systran/faster-distil-whisper-large-v3",
+    "deepdml/faster-whisper-large-v3-turbo-ct2",
     "istupakov/parakeet-tdt-0.6b-v2-onnx",
+    "istupakov/parakeet-tdt-0.6b-v3-onnx",
 ]
 _SPEACHES_CPU_TTS_MODELS = [
     "speaches-ai/Kokoro-82M-v1.0-ONNX-int8",
 ]
 _SPEACHES_CPU_STT_MODELS = [
     "Systran/faster-distil-whisper-large-v3",
+    "deepdml/faster-whisper-large-v3-turbo-ct2",
     "istupakov/parakeet-tdt-0.6b-v2-onnx",
+    "istupakov/parakeet-tdt-0.6b-v3-onnx",
+]
+
+# asr-canary uses local slugs (the model_id in its registry), not HF repo IDs
+_ASR_CANARY_CUDA_URL = "http://asr-canary-cuda:8000"
+_ASR_CANARY_CPU_URL = "http://asr-canary:8000"
+_ASR_CANARY_CUDA_STT_MODELS = [
+    "canary-180m-flash",
+    "canary-1b-flash",
+    "canary-qwen-2.5b",
+]
+_ASR_CANARY_CPU_STT_MODELS = [
+    "canary-180m-flash",
 ]
 
 
@@ -215,11 +265,19 @@ async def _unload_speaches_models(base_url: str, group: str, model_ids: list) ->
                 )
 
 
-async def _unload_cuda_stt():
+async def _unload_cuda_stt_speaches():
     """Unload CUDA STT models from speaches-cuda to free VRAM."""
-    logger.warning("[resource_manager] unloading cuda-stt models")
+    logger.warning("[resource_manager] unloading cuda-stt-speaches models")
     await _unload_speaches_models(
-        _SPEACHES_CUDA_URL, "cuda-stt", _SPEACHES_CUDA_STT_MODELS
+        _SPEACHES_CUDA_URL, "cuda-stt-speaches", _SPEACHES_CUDA_STT_MODELS
+    )
+
+
+async def _unload_cuda_stt_canary():
+    """Unload CUDA STT models from asr-canary-cuda to free VRAM."""
+    logger.warning("[resource_manager] unloading cuda-stt-canary models")
+    await _unload_speaches_models(
+        _ASR_CANARY_CUDA_URL, "cuda-stt-canary", _ASR_CANARY_CUDA_STT_MODELS
     )
 
 
@@ -231,11 +289,19 @@ async def _unload_cpu_tts():
     )
 
 
-async def _unload_cpu_stt():
+async def _unload_cpu_stt_speaches():
     """Unload CPU STT models from speaches to free RAM."""
-    logger.warning("[resource_manager] unloading cpu-stt models")
+    logger.warning("[resource_manager] unloading cpu-stt-speaches models")
     await _unload_speaches_models(
-        _SPEACHES_CPU_URL, "cpu-stt", _SPEACHES_CPU_STT_MODELS
+        _SPEACHES_CPU_URL, "cpu-stt-speaches", _SPEACHES_CPU_STT_MODELS
+    )
+
+
+async def _unload_cpu_stt_canary():
+    """Unload CPU STT models from asr-canary to free RAM."""
+    logger.warning("[resource_manager] unloading cpu-stt-canary models")
+    await _unload_speaches_models(
+        _ASR_CANARY_CPU_URL, "cpu-stt-canary", _ASR_CANARY_CPU_STT_MODELS
     )
 
 
@@ -243,11 +309,13 @@ _UNLOAD_FNS = {
     "cuda-llm": _unload_cuda_llm,
     "cuda-img": _unload_cuda_img,
     "cuda-tts": _unload_cuda_tts,
-    "cuda-stt": _unload_cuda_stt,
+    "cuda-stt-speaches": _unload_cuda_stt_speaches,
+    "cuda-stt-canary": _unload_cuda_stt_canary,
     "cpu-llm": _unload_cpu_llm,
     "cpu-img": _unload_cpu_img,
     "cpu-tts": _unload_cpu_tts,
-    "cpu-stt": _unload_cpu_stt,
+    "cpu-stt-speaches": _unload_cpu_stt_speaches,
+    "cpu-stt-canary": _unload_cpu_stt_canary,
 }
 
 # ---------------------------------------------------------------------------
@@ -348,6 +416,59 @@ class ResourceManager(CustomLogger):
         sem = _cuda_sem if hw == "CUDA" else _cpu_sem
         sem.release()
         logger.warning("[resource_manager] released %s semaphore", hw)
+
+
+# ---------------------------------------------------------------------------
+# LiteLLM whisper_transformation patch
+#
+# LiteLLM's OpenAIWhisperAudioTranscriptionConfig.transform_audio_transcription_request rewrites
+# response_format=json|text → verbose_json unconditionally ("ensures 'duration'
+# is received - used for cost calculation"). Speaches' parakeet executor
+# refuses verbose_json. Patch skips the rewrite for models that don't support
+# it; the client's chosen response_format passes through untouched.
+# ---------------------------------------------------------------------------
+
+_NO_VERBOSE_JSON_SUBSTRINGS = ("parakeet",)
+
+
+def _patch_whisper_transformation() -> None:
+    try:
+        from litellm.llms.openai.transcriptions.whisper_transformation import (
+            OpenAIWhisperAudioTranscriptionConfig,
+        )
+        from litellm.llms.base_llm.audio_transcription.transformation import (
+            AudioTranscriptionRequestData,
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning(
+            "[resource_manager] whisper_transformation patch skipped (import failed): %s",
+            e,
+        )
+        return
+
+    _orig = OpenAIWhisperAudioTranscriptionConfig.transform_audio_transcription_request
+
+    def _patched(
+        self,
+        model,
+        audio_file,
+        optional_params,
+        litellm_params,
+    ):
+        model_lc = (model or "").lower()
+        if any(s in model_lc for s in _NO_VERBOSE_JSON_SUBSTRINGS):
+            data = {"model": model, "file": audio_file, **optional_params}
+            return AudioTranscriptionRequestData(data=data)
+        return _orig(self, model, audio_file, optional_params, litellm_params)
+
+    OpenAIWhisperAudioTranscriptionConfig.transform_audio_transcription_request = _patched
+    logger.warning(
+        "[resource_manager] patched OpenAIWhisperAudioTranscriptionConfig: skip verbose_json rewrite for %s",
+        _NO_VERBOSE_JSON_SUBSTRINGS,
+    )
+
+
+_patch_whisper_transformation()
 
 
 # LiteLLM proxy loads this when config references the module
