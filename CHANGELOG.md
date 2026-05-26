@@ -2,6 +2,40 @@
 
 All notable changes to this project are documented here.
 
+## [v2.8.0] — 2026-05-25
+
+**Add `vllm` — in-repo vLLM audio-LLM supervisor exposing transcribe + chat aliases for Qwen3-ASR + Voxtral.**
+
+vllm-the-library serves two audio-LLMs that don't fit speaches' faster-whisper / parakeet stack: `Qwen/Qwen3-ASR-1.7B` and `mistralai/Voxtral-Mini-3B-2507`. Both are multilingual ASR AND accept chat-completions with audio input parts. vllm's own `serve` CLI gives us the OpenAI-compatible endpoints; what's missing is lifecycle: only one model fits in VRAM at a time, vLLM doesn't have a built-in eviction protocol, and the LiteLLM CUDA resource manager needs a speaches-shaped `/api/ps` surface to drive evictions. So we wrap it.
+
+The service is named `vllm` (not `asr-vllm`) — Voxtral is a general audio-LLM (not pure ASR), and the same supervisor pattern can host additional vllm models in the future without renaming.
+
+New microservice at `aigate/vllm/` (Python 3.12, FastAPI, base image `vllm/vllm-openai:v0.21.0` — minimum supporting both models):
+
+- Single supervised `vllm serve` subprocess on `127.0.0.1:${VLLM_WRAP_SUBPROCESS_PORT}` (default 18000). Switching models = `SIGTERM` + drain (≤30s) + `SIGKILL` fallback, then spawn the new subprocess. `asyncio.Lock` serializes spawn/kill; `asyncio.Event` gates the kill path on in-flight request drain.
+- Proxies `/v1/audio/transcriptions` (multipart) and `/v1/chat/completions` (JSON, streaming SSE supported) through httpx. Multipart `model` field is extracted via byte-regex to avoid double-reading `Request.body`.
+- Each model gets two LiteLLM aliases — `local-vllm-cuda-<id>-transcribe` (mode `audio_transcription`) and `local-vllm-cuda-<id>-chat` (mode `chat`). Both proxy to the same upstream model_id, so switching endpoints is free; only switching models restarts vllm.
+- Speaches-compatible `/api/ps` + `DELETE /api/ps/{model_id}` + `POST /unload`. The LiteLLM resource manager treats the entire service as one CUDA group (`cuda-vllm`) — a single eviction kills the resident subprocess, freeing VRAM for any competing CUDA job (LLM / image-gen / TTS / other STT).
+- Background sweeper kills idle subprocess after `VLLM_WRAP_MODEL_TTL` seconds (default 600). Weights stay on disk; next request cold-starts vllm (~30–90s including weight load).
+- Python module is named `vllm_wrap` (not `vllm`) to avoid colliding with vllm-the-library in the same Python environment. Wrapper env vars use `VLLM_WRAP_*` prefix for the same reason (vllm reserves `VLLM_PORT`, `VLLM_HOST_IP`, `VLLM_LOGGING_LEVEL`, etc.). User-facing `.env` flags stay aigate-flavored: `VLLM_CUDA=1`, `VLLM_CUDA_MODEL_TTL`, etc.
+
+Wiring:
+
+- `docker-compose.yml`: new `vllm-cuda` service (profile `vllm-cuda`, builds `aigate/vllm/Dockerfile.cuda`, NVIDIA GPU, `mem_limit: 12g`, `aigate-internal` only). New `vllm-cuda-pull` sidecar on `aigate-public` runs `huggingface-cli download` for both repos at startup; main container depends on pull completion via `service_completed_successfully`. Shared HF cache at `${DATA_DIR_VLLM:-${DATA_DIR}/vllm}:/data`.
+- `litellm/config/providers/vllm-cuda.yaml`: four aliases — `*-transcribe` (mode `audio_transcription`) + `*-chat` (mode `chat`) for each of the two models.
+- `litellm/build-config.py`: `vllm-cuda` registered as activatable provider; `VLLM_CUDA` counts as an MCP-trigger flag (auto-enables the `mcp_tools` server).
+- `litellm/callbacks/resource_manager.py`: new `cuda-vllm` group + `_unload_vllm_cuda()` that issues `DELETE /api/ps/{model_id}` for every registered model_id. The vllm service does its own intra-service eviction (only one subprocess can exist), so the group treats the whole service as one eviction unit.
+- `Makefile`: `VLLM_CUDA=1` → `vllm-cuda` profile, counts as MCP trigger, included in `make down` profile list, listed in `make help`.
+- `.env.example`: new `VLLM_CUDA` flag, `DATA_DIR_VLLM`, and the full tuning surface — `VLLM_CUDA_MODEL_TTL` (default 600), `_SWEEPER_INTERVAL` (60), `_LOAD_TIMEOUT` (600), `_REQUEST_TIMEOUT` (300), `_LOG_LEVEL` (INFO), `_PRELOAD`, `_PREFETCH`.
+- `README.md`: stack diagram lists vllm CUDA; services-overview table has a new row; data directories table mentions `.data/vllm/`; new transcription+audio-chat models section with the four aliases.
+- `docs/providers.md`: new `vllm CUDA` provider section with alias → HF repo → mode table for all four aliases.
+- `docs/services-reference.md`: new `vllm` service block with endpoints table, models-served table (~8 GB / ~10 GB VRAM each), behavior notes (single-subprocess invariant, lazy spawn, idle TTL, in-flight drain, resource-manager integration, two-aliases-per-model), and environment-variable table.
+- `docs/usage.md`: transcription list extended with the two `-transcribe` aliases; new "Audio-input chat" subsection with curl example for `*-chat` aliases.
+- `docs/testing.md`: new `vllm` row noting `/healthz`, `/v1/models`, `/api/ps`, `DELETE /api/ps/{model}`, `POST /unload` coverage, plus live transcribe + chat-audio e2e tests.
+- `tests/test_vllm.sh`: five wrapper-level checks via `docker compose exec` into the internal-only `vllm-cuda` service (`/healthz`, `/v1/models`, `/api/ps`, `POST /unload`, `DELETE /api/ps/{unknown}` returns 200 or 404) plus four live e2e tests through the LiteLLM proxy — transcribe + chat-audio for both Qwen3-ASR and Voxtral with a real audio fixture.
+- `tests/test_litellm.sh`: `EXPECTED_MODELS` gets all four `local-vllm-cuda-*` aliases under `VLLM_CUDA=1`.
+- `.gitignore`: `vllm-repo/` added (research clone of vllm upstream, never committed).
+
 ## [v2.7.0] — 2026-05-25
 
 **Add `asr-canary` — in-repo NeMo Canary STT microservice with CPU + CUDA variants.**

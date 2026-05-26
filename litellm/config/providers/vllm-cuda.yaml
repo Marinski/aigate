@@ -1,0 +1,42 @@
+# vllm CUDA — two audio-LLMs served via supervised `vllm serve` subprocess.
+# Each model is exposed under two aliases: `-transcribe` for the OpenAI
+# /v1/audio/transcriptions endpoint (mode: audio_transcription) and `-chat` for
+# /v1/chat/completions with audio input parts (mode: chat). Only one model is
+# resident in VRAM at a time — the wrapper restarts vllm-serve when switching.
+
+# ── Qwen3-ASR-1.7B ─────────────────────────────────────────────────────────────
+
+- model_name: local-vllm-cuda-qwen3-asr-1.7b-transcribe
+  litellm_params:
+    model: openai/qwen3-asr-1.7b
+    api_base: http://vllm-cuda:8000/v1
+    api_key: none
+  model_info:
+    mode: audio_transcription
+
+- model_name: local-vllm-cuda-qwen3-asr-1.7b-chat
+  litellm_params:
+    model: openai/qwen3-asr-1.7b
+    api_base: http://vllm-cuda:8000/v1
+    api_key: none
+  model_info:
+    mode: chat
+
+# ── Voxtral-Mini-3B ────────────────────────────────────────────────────────────
+
+- model_name: local-vllm-cuda-voxtral-mini-3b-transcribe
+  litellm_params:
+    model: openai/voxtral-mini-3b
+    api_base: http://vllm-cuda:8000/v1
+    api_key: none
+  model_info:
+    mode: audio_transcription
+
+- model_name: local-vllm-cuda-voxtral-mini-3b-chat
+  litellm_params:
+    model: openai/voxtral-mini-3b
+    api_base: http://vllm-cuda:8000/v1
+    api_key: none
+  model_info:
+    mode: chat
+

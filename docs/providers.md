@@ -266,6 +266,17 @@ CUDA-accelerated NeMo Canary, all three sizes. Weights pulled by `asr-canary-cud
 | `local-asr-canary-cuda-1b-flash` | nvidia/canary-1b-flash | transcription (CUDA, EN/DE/FR/ES, plus EN↔X translation) |
 | `local-asr-canary-cuda-qwen-2.5b` | nvidia/canary-qwen-2.5b | transcription (CUDA, English, NeMo SALM hybrid ASR+LLM — emits punctuation/casing + can answer prompts about the audio) |
 
+## vllm CUDA (local NVIDIA — `VLLM_CUDA=1`)
+
+vLLM-served audio-LLMs via an in-repo Python/FastAPI supervisor (`aigate/vllm/`). Each model is exposed under **two aliases**: a `-transcribe` alias on `/v1/audio/transcriptions` and a `-chat` alias on `/v1/chat/completions` that accepts `{type: input_audio}` content parts. The wrapper supervises a single `vllm serve` subprocess at a time — switching models means restarting it (the entire model has to fit in VRAM). The LiteLLM resource manager evicts the subprocess whenever a competing CUDA job arrives; idle subprocesses are killed after `VLLM_CUDA_MODEL_TTL` seconds (default 600). Cold-start is slow (`vllm serve` boot + weight load is typically 30–90s).
+
+| Alias | Model | Mode |
+| ----- | ----- | ---- |
+| `local-vllm-cuda-qwen3-asr-1.7b-transcribe` | Qwen/Qwen3-ASR-1.7B | transcription (CUDA, multilingual ASR, ~8GB VRAM) |
+| `local-vllm-cuda-qwen3-asr-1.7b-chat` | Qwen/Qwen3-ASR-1.7B | chat with audio input parts |
+| `local-vllm-cuda-voxtral-mini-3b-transcribe` | mistralai/Voxtral-Mini-3B-2507 | transcription (CUDA, multilingual, ~9.5GB VRAM) |
+| `local-vllm-cuda-voxtral-mini-3b-chat` | mistralai/Voxtral-Mini-3B-2507 | chat with audio input parts — full Mistral-native multimodal LLM (summarize/translate/answer questions about audio) |
+
 ## Qwen3 CUDA TTS (local NVIDIA — `QWEN_TTS_CUDA=1`)
 
 CUDA-accelerated TTS with voice cloning via [faster-qwen3-tts](https://github.com/andimarafioti/faster-qwen3-tts). Model cached in `.data/qwen3-tts/`.

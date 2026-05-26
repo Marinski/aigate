@@ -74,6 +74,7 @@ nginx :4000                                          ┌────────
                                   ├─ Speaches CUDA      (local, CUDA STT, SPEACHES_CUDA=1)
                                   ├─ asr-canary CPU     (local, NeMo Canary STT, ASR_CANARY=1)
                                   ├─ asr-canary CUDA    (local, NVIDIA, NeMo Canary STT, ASR_CANARY_CUDA=1)
+                                  ├─ vllm CUDA      (local, NVIDIA, vLLM audio-LLMs: Qwen3-ASR/Voxtral, VLLM_CUDA=1)
                                   ├─ Qwen3 CUDA TTS     (local, CUDA voice-cloning, QWEN_TTS_CUDA=1)
                                   ├─ sd.cpp CPU         (local, image gen, SDCPP=1)
                                   ├─ sd.cpp CUDA        (local, image gen, SDCPP_CUDA=1)
@@ -108,6 +109,7 @@ Default writable locations:
 | `.data/ollama/`                              | ollama, ollama-cuda          | Downloaded model weights (shared — CPU and CUDA instances read the same blobs)             |
 | `.data/speaches/`                            | speaches, speaches-cuda      | Downloaded Whisper and Parakeet model weights (HuggingFace cache, shared between CPU/CUDA) |
 | `.data/asr-canary/`                          | asr-canary, asr-canary-cuda  | NeMo Canary model weights (HuggingFace cache, shared between CPU/CUDA — CPU pull fetches 180m-flash only, CUDA pull fetches all 3) |
+| `.data/vllm/`                            | vllm-cuda                | vLLM audio-LLM weights (HuggingFace cache for Qwen3-ASR-1.7B, Voxtral-Mini-3B) |
 | `.data/qwen3-tts/`                           | qwen3-cuda-tts               | Downloaded Qwen3-TTS model weights (HuggingFace cache)                                     |
 | `.data/sdcpp/models/`                        | sdcpp, sdcpp-cuda            | Downloaded stable-diffusion model weights (shared between CPU and CUDA)                    |
 | `.data/librechat/`                           | librechat, librechat-mongodb | Conversation data (MongoDB), file uploads                                                  |
@@ -135,6 +137,7 @@ Default writable locations:
 | **Speaches CUDA** _(optional, `SPEACHES_CUDA=1`)_                                                              | CUDA-accelerated STT via speaches — Whisper-distil-large-v3 and Parakeet-TDT-0.6b. Uses the same model cache as CPU speaches. Shares `.data/speaches/` — no separate download. Requires `nvidia-container-toolkit`.                                                                                                                                                            |
 | **asr-canary CPU** _(optional, `ASR_CANARY=1`)_                                                                | NVIDIA NeMo Canary STT served by an in-repo FastAPI wrapper (`aigate/asr-canary/`). CPU build ships `canary-180m-flash` (175M, English). Weights pre-pulled by `asr-canary-pull` into `.data/asr-canary/`, served offline by the main container. Loaded models auto-unload after `ASR_CANARY_MODEL_TTL` (default 10 min). |
 | **asr-canary CUDA** _(optional, `ASR_CANARY_CUDA=1`)_                                                          | CUDA-accelerated NeMo Canary STT — all three sizes: `canary-180m-flash` (English), `canary-1b-flash` (EN/DE/FR/ES + EN↔X translation), `canary-qwen-2.5b` (hybrid SALM, English, emits punctuation + answers audio prompts). Shares `.data/asr-canary/` with the CPU variant. Requires `nvidia-container-toolkit`. |
+| **vllm CUDA** _(optional, `VLLM_CUDA=1`)_                                                              | CUDA-accelerated vLLM audio-LLM wrapper (`aigate/vllm/`). Supervises a single `vllm serve` subprocess; each of `qwen3-asr-1.7b`, `voxtral-mini-3b` is exposed under two LiteLLM aliases (`-transcribe` for `/v1/audio/transcriptions`, `-chat` for `/v1/chat/completions` with audio input parts). Only one model resident in VRAM — switching models restarts the subprocess. Weights pre-pulled by `vllm-cuda-pull` into `.data/vllm/`. Idle TTL kill (`VLLM_CUDA_MODEL_TTL`, default 10 min). Requires `nvidia-container-toolkit`. |
 | **Qwen3 CUDA TTS** _(optional, `QWEN_TTS_CUDA=1`)_                                                             | CUDA-accelerated TTS via [faster-qwen3-tts](https://github.com/andimarafioti/faster-qwen3-tts). Runs `Qwen3-TTS-12Hz-0.6B-Base` with CUDA graphs. Voice cloning via reference audio. Models cached in `.data/qwen3-tts/`. Requires `nvidia-container-toolkit`.                                                                                                                |
 | **sd.cpp CPU** _(optional, `SDCPP=1`)_                                                                         | Local CPU image generation via [stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp). Go wrapper with OpenAI-compatible `/v1/images/generations` endpoint, model hot-swap, idle timeout auto-unload. Models: sd-turbo, sdxl-turbo. Models cached in `.data/sdcpp/models/`.                                                                                   |
 | **sd.cpp CUDA** _(optional, `SDCPP_CUDA=1`)_                                                                   | CUDA-accelerated image generation via stable-diffusion.cpp. Same wrapper as CPU with CUDA backend. Models: sd-turbo, sdxl-turbo, sdxl-lightning, flux-schnell, juggernaut-xi. Non-blocking — rejects concurrent requests with 503 instead of queuing (resource manager handles scheduling). Requires `nvidia-container-toolkit`.                                              |
@@ -265,6 +268,17 @@ CUDA models run with flash attention and quantized KV cache. See [Resource manag
 | `local-asr-canary-cuda-180m-flash`  | NeMo Canary 180M flash — English-only, ASR (CUDA)                      |
 | `local-asr-canary-cuda-1b-flash`    | NeMo Canary 1B flash — EN/DE/FR/ES, with EN↔X translation (CUDA)       |
 | `local-asr-canary-cuda-qwen-2.5b`   | NeMo Canary Qwen 2.5B — hybrid ASR+LLM (English, CUDA)                 |
+
+### Local transcription + audio chat (vllm, CUDA — `VLLM_CUDA=1`)
+
+Each model exposes two aliases: `-transcribe` for `/v1/audio/transcriptions`, `-chat` for `/v1/chat/completions` with audio input parts. Single resident model — switching restarts the supervised `vllm serve` subprocess.
+
+| Model name                                                  | Description                                                            |
+| ----------------------------------------------------------- | ---------------------------------------------------------------------- |
+| `local-vllm-cuda-qwen3-asr-1.7b-transcribe`             | Qwen3-ASR 1.7B — multilingual ASR via vLLM (CUDA)                      |
+| `local-vllm-cuda-qwen3-asr-1.7b-chat`                   | Qwen3-ASR 1.7B — chat-completions with audio input parts (CUDA)        |
+| `local-vllm-cuda-voxtral-mini-3b-transcribe`            | Mistral Voxtral-Mini 3B — multilingual ASR (CUDA)                      |
+| `local-vllm-cuda-voxtral-mini-3b-chat`                  | Mistral Voxtral-Mini 3B — chat-completions with audio input (CUDA)     |
 
 ### Local transcription (Speaches, CPU — `SPEACHES=1`)
 

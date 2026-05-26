@@ -176,6 +176,16 @@ if [ "${ASR_CANARY_CUDA:-}" = "1" ]; then
     )
 fi
 
+# vllm CUDA models — only expected when VLLM_CUDA=1
+if [ "${VLLM_CUDA:-}" = "1" ]; then
+    EXPECTED_MODELS+=(
+        "local-vllm-cuda-qwen3-asr-1.7b-transcribe"
+        "local-vllm-cuda-qwen3-asr-1.7b-chat"
+        "local-vllm-cuda-voxtral-mini-3b-transcribe"
+        "local-vllm-cuda-voxtral-mini-3b-chat"
+    )
+fi
+
 test_litellm_models_registered() {
     local models
     models=$(get "$BASE_URL/models")

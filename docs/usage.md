@@ -434,7 +434,29 @@ curl http://localhost:4000/audio/transcriptions \
   -F "file=@audio.mp3"
 ```
 
-Transcription models: `groq-whisper-large-v3-turbo`, `groq-whisper-large-v3`, `voxtral-small`, `openai-whisper`, `openai-gpt-4o-transcribe`, `openai-gpt-4o-mini-transcribe`, `local-speaches-whisper-distil-large-v3`, `local-speaches-whisper-large-v3-turbo`, `local-speaches-parakeet-tdt-0.6b`, `local-speaches-parakeet-tdt-0.6b-v3`, `local-speaches-cuda-whisper-distil-large-v3` (CUDA), `local-speaches-cuda-whisper-large-v3-turbo` (CUDA), `local-speaches-cuda-parakeet-tdt-0.6b` (CUDA), `local-speaches-cuda-parakeet-tdt-0.6b-v3` (CUDA), `local-asr-canary-180m-flash` (CPU NeMo Canary, English), `local-asr-canary-cuda-180m-flash` (CUDA, English), `local-asr-canary-cuda-1b-flash` (CUDA, EN/DE/FR/ES + EN↔X translation), `local-asr-canary-cuda-qwen-2.5b` (CUDA, English, hybrid SALM).
+Transcription models: `groq-whisper-large-v3-turbo`, `groq-whisper-large-v3`, `voxtral-small`, `openai-whisper`, `openai-gpt-4o-transcribe`, `openai-gpt-4o-mini-transcribe`, `local-speaches-whisper-distil-large-v3`, `local-speaches-whisper-large-v3-turbo`, `local-speaches-parakeet-tdt-0.6b`, `local-speaches-parakeet-tdt-0.6b-v3`, `local-speaches-cuda-whisper-distil-large-v3` (CUDA), `local-speaches-cuda-whisper-large-v3-turbo` (CUDA), `local-speaches-cuda-parakeet-tdt-0.6b` (CUDA), `local-speaches-cuda-parakeet-tdt-0.6b-v3` (CUDA), `local-asr-canary-180m-flash` (CPU NeMo Canary, English), `local-asr-canary-cuda-180m-flash` (CUDA, English), `local-asr-canary-cuda-1b-flash` (CUDA, EN/DE/FR/ES + EN↔X translation), `local-asr-canary-cuda-qwen-2.5b` (CUDA, English, hybrid SALM), `local-vllm-cuda-qwen3-asr-1.7b-transcribe` (CUDA, vLLM), `local-vllm-cuda-voxtral-mini-3b-transcribe` (CUDA, vLLM).
+
+### Audio-input chat (vLLM audio-LLMs)
+
+The same vLLM audio models also expose `/chat/completions` with audio input parts under the `-chat` aliases:
+
+```bash
+curl http://localhost:4000/chat/completions \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "local-vllm-cuda-voxtral-mini-3b-chat",
+    "messages": [{
+      "role": "user",
+      "content": [
+        {"type": "text", "text": "summarize this audio in one sentence"},
+        {"type": "audio_url", "audio_url": {"url": "http://YOUR_HOST:4000/storage/uploads/clip.mp3"}}
+      ]
+    }]
+  }'
+```
+
+Audio-chat models: `local-vllm-cuda-qwen3-asr-1.7b-chat`, `local-vllm-cuda-voxtral-mini-3b-chat`. Each model accepts both `-transcribe` and `-chat` aliases — same underlying weights, only one resident in VRAM at a time (switching models restarts the vllm subprocess).
 
 ---
 

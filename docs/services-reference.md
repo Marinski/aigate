@@ -386,6 +386,58 @@ Source: `aigate/asr-canary/` (Python 3.12, FastAPI, `nemo-toolkit[asr]`).
 
 ---
 
+## vllm — Local vLLM audio-LLM (optional, `VLLM_CUDA=1`)
+
+In-repo Python/FastAPI wrapper that supervises a single `vllm serve` subprocess and proxies OpenAI-compatible endpoints. Each registered model is exposed via **both** `/v1/audio/transcriptions` (as `*-transcribe`) and `/v1/chat/completions` (as `*-chat`) — same upstream model, two LiteLLM aliases. Only one model is resident in VRAM at a time; switching models restarts the vLLM subprocess. Also exposes speaches-compatible `/api/ps` for the LiteLLM CUDA resource manager.
+
+Source: `aigate/vllm/` (Python 3.12, FastAPI, base image `vllm/vllm-openai:v0.21.0`).
+
+### Endpoints (internal — accessed through LiteLLM, not directly via nginx)
+
+| Endpoint | URL | Description |
+| -------- | --- | ----------- |
+| Transcribe | `POST /v1/audio/transcriptions` | OpenAI-compatible multipart upload (`file`, `model`, ...) |
+| Chat | `POST /v1/chat/completions` | OpenAI-compatible chat with audio input parts (supports streaming) |
+| List models | `GET /v1/models` | Configured model_ids from `models.json` |
+| Loaded model | `GET /api/ps` | Currently resident model + `idle_seconds` (speaches-compat) |
+| Unload one | `DELETE /api/ps/{model_id}` | Stop subprocess for the named model (speaches-compat) |
+| Unload all | `POST /unload` | Stop the resident subprocess |
+| Health | `GET /healthz` | Liveness + configured model_ids |
+
+### Models served (CUDA)
+
+| model_id | HF repo | Approx VRAM |
+| -------- | ------- | ----------- |
+| `qwen3-asr-1.7b` | `Qwen/Qwen3-ASR-1.7B` | ~8 GB |
+| `voxtral-mini-3b` | `mistralai/Voxtral-Mini-3B-2507` | ~10 GB |
+
+### Behavior
+
+- **One subprocess at a time**: the wrapper supervises a single `vllm serve` child on `127.0.0.1:${VLLM_WRAP_SUBPROCESS_PORT}` (default `18000`). Switching models = SIGTERM the old one, wait for drain, spawn the new one.
+- **Pre-pulled, not lazy**: `vllm-cuda-pull` sidecar runs on `aigate-public` at startup and downloads both repos via `huggingface_hub.snapshot_download` into `${DATA_DIR_VLLM}/hf`. Main container runs on `aigate-internal` (no egress).
+- **Lazy spawn**: subprocess starts only on first request to a given model.
+- **Idle TTL kill**: background sweeper kills the subprocess after `VLLM_CUDA_MODEL_TTL` (default 600s). Weights stay on disk.
+- **In-flight drain**: kill path waits up to 30s for in-flight requests to finish, then `SIGTERM` (20s) → `SIGKILL` (10s).
+- **CUDA resource manager**: `local-vllm-cuda-*` aliases participate in the `cuda-vllm` group. A competing CUDA job (LLM, image gen, TTS, other STT) triggers `DELETE /api/ps/{model_id}` before the job runs.
+- **Two aliases per model**: `local-vllm-cuda-<id>-transcribe` (mode `audio_transcription`) and `local-vllm-cuda-<id>-chat` (mode `chat`) — both proxy to the same upstream model_id, so endpoint-switching is free; only model-switching restarts vllm.
+
+### Environment variables
+
+| Variable | Default | Description |
+| -------- | ------- | ----------- |
+| `VLLM_CUDA_MODEL_TTL` | `600` | Idle seconds before subprocess kill (`-1` disables) |
+| `VLLM_CUDA_SWEEPER_INTERVAL` | `60` | Idle sweeper poll interval (seconds) |
+| `VLLM_CUDA_LOAD_TIMEOUT` | `600` | Max seconds to wait for `vllm serve` `/health` to return 200 |
+| `VLLM_CUDA_REQUEST_TIMEOUT` | `300` | Per-request proxy timeout (seconds) |
+| `VLLM_CUDA_LOG_LEVEL` | `INFO` | Log level |
+| `VLLM_CUDA_PRELOAD` | _empty_ | model_id to spawn at boot (only one allowed — single-subprocess) |
+| `VLLM_CUDA_PREFETCH` | _empty_ | Comma-separated model_ids to additionally HF-snapshot at boot inside the main container (pull container already handles the default set) |
+| `VLLM_CUDA_MEM_LIMIT` | `12g` | Container memory limit |
+| `VLLM_CUDA_CPUS` | `4.0` | Container CPU limit |
+| `DATA_DIR_VLLM` | `${DATA_DIR}/vllm` | HF cache directory |
+
+---
+
 ## MCP Tools — Media Generation (auto-enabled)
 
 Auto-enabled when any image or TTS provider is active (HuggingFace, OpenAI, Speaches, SDCPP, CUDA). Runs as an internal service — no direct nginx route, accessed only through LiteLLM's aggregated MCP endpoint at `/mcp/`.

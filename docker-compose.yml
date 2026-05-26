@@ -509,6 +509,72 @@ services:
     networks:
       - aigate-public
 
+  # ── vllm CUDA (vLLM audio-LLM wrapper — Qwen3-ASR / Voxtral / Granite) ──
+
+  vllm-cuda:
+    profiles: ["vllm-cuda"]
+    build:
+      context: ./vllm
+      dockerfile: Dockerfile.cuda
+    restart: unless-stopped
+    mem_limit: ${VLLM_CUDA_MEM_LIMIT:-12g}
+    memswap_limit: ${VLLM_CUDA_MEMSWAP_LIMIT:-24g}
+    cpus: ${VLLM_CUDA_CPUS:-4.0}
+    environment:
+      VLLM_WRAP_MODEL_TTL: ${VLLM_CUDA_MODEL_TTL:-600}
+      VLLM_WRAP_SWEEPER_INTERVAL: ${VLLM_CUDA_SWEEPER_INTERVAL:-60}
+      VLLM_WRAP_LOAD_TIMEOUT: ${VLLM_CUDA_LOAD_TIMEOUT:-600}
+      VLLM_WRAP_REQUEST_TIMEOUT: ${VLLM_CUDA_REQUEST_TIMEOUT:-300}
+      VLLM_WRAP_LOG_LEVEL: ${VLLM_CUDA_LOG_LEVEL:-INFO}
+      VLLM_WRAP_PRELOAD: ${VLLM_CUDA_PRELOAD:-}
+      VLLM_WRAP_PREFETCH: ${VLLM_CUDA_PREFETCH:-}
+    volumes:
+      - ${DATA_DIR_VLLM:-${DATA_DIR:-.data}/vllm}:/data
+    depends_on:
+      vllm-cuda-pull:
+        condition: service_completed_successfully
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz')\""]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - aigate-internal
+
+  # ── vllm-cuda pull (download all 3 vLLM audio-LLM models) ──────────────
+
+  vllm-cuda-pull:
+    profiles: ["vllm-cuda"]
+    image: python:3.12-slim-bookworm@sha256:d193c6f51a7dbd10395d6328de3a7edb0516fb0608ca138036576f574c3e07d2
+    restart: "no"
+    mem_limit: ${VLLM_CUDA_PULL_MEM_LIMIT:-4g}
+    memswap_limit: ${VLLM_CUDA_PULL_MEMSWAP_LIMIT:-8g}
+    cpus: ${VLLM_CUDA_PULL_CPUS:-2.0}
+    environment:
+      HF_HOME: /data/hf
+    entrypoint:
+      - sh
+      - -c
+      - |
+        set -eu
+        pip install --quiet --no-cache-dir "huggingface-hub==0.35.3"
+        huggingface-cli download --max-workers 1 Qwen/Qwen3-ASR-1.7B
+        huggingface-cli download --max-workers 1 mistralai/Voxtral-Mini-3B-2507
+    volumes:
+      - ${DATA_DIR_VLLM:-${DATA_DIR:-.data}/vllm}:/data
+    networks:
+      - aigate-public
+
   # ── Speaches (local transcription — faster-whisper + Parakeet TDT) ──────────
 
   speaches:

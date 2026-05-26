@@ -14,6 +14,7 @@ Groups (CUDA):
   cuda-tts          : local-qwen3-cuda-tts
   cuda-stt-speaches : local-speaches-cuda-*
   cuda-stt-canary   : local-asr-canary-cuda-*
+  cuda-vllm     : local-vllm-cuda-*  (audio-LLMs: Qwen3-ASR / Voxtral / Granite-Speech)
 
 Groups (CPU):
   cpu-llm           : local-ollama-cpu-* models   (unload frees RAM)
@@ -22,9 +23,9 @@ Groups (CPU):
   cpu-stt-speaches  : local-speaches-whisper-*, local-speaches-parakeet-*
   cpu-stt-canary    : local-asr-canary-*
 
-The two STT services are split into separate groups so they evict each
-other (both compete for the same VRAM/RAM). Within each service, the
-wrapper handles its own intra-service eviction.
+The three CUDA STT services are split into separate groups so they evict each
+other (all compete for the same VRAM). Within each service, the wrapper
+handles its own intra-service eviction (only one model resident at a time).
 
 Speaches unloading uses DELETE /api/ps/{model_id} which evicts the model
 from memory but keeps it on disk — next request auto-reloads it.
@@ -62,6 +63,9 @@ _CUDA_STT_CANARY = {
     "local-asr-canary-cuda-1b-flash",
     "local-asr-canary-cuda-qwen-2.5b",
 }
+# vllm exposes each model under two aliases (-transcribe + -chat) — both
+# map onto the same supervised vllm-serve subprocess, so they share one group.
+_VLLM_CUDA_PREFIX = "local-vllm-cuda-"
 
 _CPU_TTS = {"local-speaches-kokoro-tts"}
 _CPU_STT_SPEACHES = {
@@ -80,6 +84,7 @@ _ALL_CUDA_GROUPS = {
     "cuda-tts",
     "cuda-stt-speaches",
     "cuda-stt-canary",
+    "cuda-vllm",
 }
 _ALL_CPU_GROUPS = {
     "cpu-llm",
@@ -105,6 +110,8 @@ def _get_group(model: str) -> Optional[str]:
         return "cuda-stt-speaches"
     if model in _CUDA_STT_CANARY:
         return "cuda-stt-canary"
+    if model.startswith(_VLLM_CUDA_PREFIX):
+        return "cuda-vllm"
     if model in _CPU_TTS:
         return "cpu-tts"
     if model in _CPU_STT_SPEACHES:
@@ -234,6 +241,15 @@ _ASR_CANARY_CPU_STT_MODELS = [
     "canary-180m-flash",
 ]
 
+# vllm — single supervised vllm-serve subprocess; DELETE /api/ps/{model_id}
+# kills it and frees VRAM. We send DELETE for every registered model_id; only
+# the one currently loaded returns 200, the rest return 404 (no-op).
+_VLLM_CUDA_URL = "http://vllm-cuda:8000"
+_VLLM_CUDA_MODELS = [
+    "qwen3-asr-1.7b",
+    "voxtral-mini-3b",
+]
+
 
 async def _unload_speaches_models(base_url: str, group: str, model_ids: list) -> None:
     """Unload models from a speaches instance via DELETE /api/ps/{model_id}."""
@@ -281,6 +297,14 @@ async def _unload_cuda_stt_canary():
     )
 
 
+async def _unload_vllm_cuda():
+    """Kill the supervised vllm-serve subprocess (frees the entire model VRAM)."""
+    logger.warning("[resource_manager] unloading cuda-vllm subprocess")
+    await _unload_speaches_models(
+        _VLLM_CUDA_URL, "cuda-vllm", _VLLM_CUDA_MODELS
+    )
+
+
 async def _unload_cpu_tts():
     """Unload CPU TTS models from speaches to free RAM."""
     logger.warning("[resource_manager] unloading cpu-tts models")
@@ -311,6 +335,7 @@ _UNLOAD_FNS = {
     "cuda-tts": _unload_cuda_tts,
     "cuda-stt-speaches": _unload_cuda_stt_speaches,
     "cuda-stt-canary": _unload_cuda_stt_canary,
+    "cuda-vllm": _unload_vllm_cuda,
     "cpu-llm": _unload_cpu_llm,
     "cpu-img": _unload_cpu_img,
     "cpu-tts": _unload_cpu_tts,
