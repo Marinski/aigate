@@ -21,6 +21,8 @@ import logging
 import time
 from typing import Any
 
+from .base import TranscribeResult
+
 
 _PROMPT_PREFIX = "Transcribe the following:"
 
@@ -68,13 +70,14 @@ class SalmBackend:
         source_lang: str | None,
         target_lang: str | None,
         task: str,
-    ) -> str:
-        del source_lang, target_lang, task  # SALM doesn't expose these knobs
+        with_timestamps: bool = False,
+    ) -> TranscribeResult:
+        del source_lang, target_lang, task, with_timestamps  # SALM is text-only
         model = await self.get_model()
         async with self._lock:
             text = await asyncio.to_thread(self._generate_sync, model, audio_path)
             self._last_used = time.monotonic()
-            return text
+            return TranscribeResult(text=text, supports_timestamps=False)
 
     def _generate_sync(self, model: Any, audio_path: str) -> str:
         audio_tag = getattr(model, "audio_locator_tag", "<audio>")

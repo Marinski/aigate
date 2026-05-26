@@ -14,6 +14,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from .base import TranscribeResult
+
 
 def _resolve_local_nemo(repo: str) -> str | None:
     hf_home = os.environ.get("HF_HOME", "")
@@ -81,19 +83,21 @@ class MultitaskBackend:
         source_lang: str | None,
         target_lang: str | None,
         task: str,
-    ) -> str:
+        with_timestamps: bool = False,
+    ) -> TranscribeResult:
         model = await self.get_model()
         async with self._lock:
-            text = await asyncio.to_thread(
+            result = await asyncio.to_thread(
                 self._transcribe_sync,
                 model,
                 audio_path,
                 source_lang,
                 target_lang,
                 task,
+                with_timestamps,
             )
             self._last_used = time.monotonic()
-            return text
+            return result
 
     def _transcribe_sync(
         self,
@@ -102,7 +106,8 @@ class MultitaskBackend:
         source_lang: str | None,
         target_lang: str | None,
         task: str,
-    ) -> str:
+        with_timestamps: bool,
+    ) -> TranscribeResult:
         kwargs: dict[str, Any] = {
             "audio": [audio_path],
             "batch_size": 1,
@@ -113,17 +118,38 @@ class MultitaskBackend:
             kwargs["source_lang"] = source_lang
         if target_lang:
             kwargs["target_lang"] = target_lang
+        if with_timestamps:
+            kwargs["timestamps"] = True
 
         results = model.transcribe(**kwargs)
         if not results:
-            return ""
+            return TranscribeResult(text="", supports_timestamps=True)
         first = results[0]
+
         if isinstance(first, str):
-            return first
+            return TranscribeResult(text=first, supports_timestamps=True)
+
         text_attr = getattr(first, "text", None)
-        if isinstance(text_attr, str):
-            return text_attr
-        return str(first)
+        text = text_attr if isinstance(text_attr, str) else str(first)
+
+        segments: list[dict] = []
+        words: list[dict] = []
+        if with_timestamps:
+            ts = getattr(first, "timestamp", None)
+            if isinstance(ts, dict):
+                segments = _segments_from_nemo(ts.get("segment", []))
+                words = _words_from_nemo(ts.get("word", []))
+                self._log.debug(
+                    "timestamps: %d segments, %d words", len(segments), len(words)
+                )
+
+        return TranscribeResult(
+            text=text,
+            segments=segments,
+            words=words,
+            language=source_lang,
+            supports_timestamps=True,
+        )
 
     async def unload(self) -> None:
         async with self._lock:
@@ -140,3 +166,57 @@ class MultitaskBackend:
                 torch.cuda.empty_cache()
         except ImportError:
             pass
+
+
+def _coerce_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _segments_from_nemo(raw: Any) -> list[dict]:
+    if not isinstance(raw, list):
+        return []
+    out: list[dict] = []
+    for idx, item in enumerate(raw):
+        if not isinstance(item, dict):
+            continue
+        text = item.get("segment") or item.get("text") or ""
+        start = _coerce_float(item.get("start"))
+        end = _coerce_float(item.get("end"))
+        if start is None or end is None:
+            continue
+        out.append(
+            {
+                "id": idx,
+                "start": start,
+                "end": end,
+                "text": str(text).strip(),
+            }
+        )
+    return out
+
+
+def _words_from_nemo(raw: Any) -> list[dict]:
+    if not isinstance(raw, list):
+        return []
+    out: list[dict] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        word = item.get("word") or item.get("text") or ""
+        start = _coerce_float(item.get("start"))
+        end = _coerce_float(item.get("end"))
+        if start is None or end is None:
+            continue
+        out.append(
+            {
+                "word": str(word).strip(),
+                "start": start,
+                "end": end,
+            }
+        )
+    return out

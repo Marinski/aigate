@@ -1,6 +1,6 @@
 [project]
 name = "asr-canary"
-version = "0.1.0"
+version = "0.2.0"
 description = "NeMo Canary ASR wrapper — OpenAI-compatible /v1/audio/transcriptions with lazy-load + idle TTL unload"
 license = { text = "WTFPL" }
 requires-python = ">=3.10,<3.13"

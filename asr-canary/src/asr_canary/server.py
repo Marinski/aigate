@@ -25,12 +25,16 @@ from typing import Any
 from urllib.parse import unquote
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 
 from . import config
 from .audio import AudioConversionError, to_wav_16k_mono
 from .logging import configure as configure_logging
 from .models import build_backends
+from .models.base import TranscribeResult
+
+
+_VERBOSE_FORMATS = {"verbose_json", "srt", "vtt"}
 
 
 log = logging.getLogger("asr_canary.server")
@@ -198,6 +202,9 @@ async def transcribe(
     response_format: str = Form(default="json"),
     prompt: str | None = Form(default=None),
     temperature: float | None = Form(default=None),
+    timestamp_granularities: list[str] = Form(
+        default=[], alias="timestamp_granularities[]"
+    ),
 ) -> Any:
     del prompt, temperature  # accepted for OpenAI compatibility, not used
 
@@ -236,6 +243,7 @@ async def transcribe(
 
     try:
         wav_path = await asyncio.to_thread(to_wav_16k_mono, raw, original_name)
+        duration = await asyncio.to_thread(_wav_duration_seconds, wav_path)
     except AudioConversionError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -244,12 +252,18 @@ async def transcribe(
     target_lang = entry.get("default_target_lang", source_lang)
     task = entry.get("default_task", "asr")
 
+    fmt = (response_format or "json").lower()
+    # Timestamps are needed for verbose_json (always) and srt/vtt (built from
+    # segments). Cheaper formats (text/json) skip the timestamp pass.
+    needs_timestamps = fmt in _VERBOSE_FORMATS
+
     try:
-        text = await backend.transcribe(
+        result = await backend.transcribe(
             wav_path,
             source_lang=source_lang,
             target_lang=target_lang,
             task=task,
+            with_timestamps=needs_timestamps,
         )
     finally:
         try:
@@ -257,10 +271,129 @@ async def transcribe(
         except OSError:
             pass
 
-    fmt = (response_format or "json").lower()
+    if duration is not None and result.duration is None:
+        result.duration = duration
+    if result.language is None:
+        result.language = source_lang
+
     if fmt in ("text", "txt"):
-        return text
-    return {"text": text}
+        return PlainTextResponse(result.text)
+    if fmt == "verbose_json":
+        return _verbose_json_response(result, task=task, granularities=timestamp_granularities)
+    if fmt == "srt":
+        return PlainTextResponse(
+            _segments_to_srt(_segments_for_subtitles(result)),
+            media_type="application/x-subrip",
+        )
+    if fmt == "vtt":
+        return PlainTextResponse(
+            _segments_to_vtt(_segments_for_subtitles(result)),
+            media_type="text/vtt",
+        )
+    return {"text": result.text}
+
+
+def _wav_duration_seconds(wav_path: str) -> float | None:
+    """Return duration of a 16-bit mono PCM WAV in seconds."""
+    import wave
+
+    try:
+        with wave.open(wav_path, "rb") as wf:
+            frames = wf.getnframes()
+            rate = wf.getframerate()
+            if not rate:
+                return None
+            return frames / float(rate)
+    except (OSError, wave.Error):
+        return None
+
+
+def _verbose_json_response(
+    result: TranscribeResult,
+    *,
+    task: str,
+    granularities: list[str],
+) -> dict[str, Any]:
+    """Build OpenAI-shaped verbose_json. Whisper-only fields are null-filled
+    so clients reading e.g. segment.avg_logprob don't crash.
+
+    Note on granularities: OpenAI defaults to `segment` only, with `word`
+    opt-in via `timestamp_granularities[]=word`. The LiteLLM proxy collapses
+    repeated form fields to a single value (last wins), so a client asking
+    for both via LiteLLM arrives here as `['word']`. To avoid that footgun
+    we always emit both — it's free for us since the backend computes both
+    in the same pass, and clients that only read one are unaffected.
+    """
+    del granularities  # always emit both; see docstring
+
+    segments_out: list[dict] = []
+    for seg in result.segments:
+        segments_out.append(
+            {
+                "id": seg.get("id", 0),
+                "seek": 0,
+                "start": seg["start"],
+                "end": seg["end"],
+                "text": seg.get("text", ""),
+                "tokens": [],
+                "temperature": 0.0,
+                "avg_logprob": None,
+                "compression_ratio": None,
+                "no_speech_prob": None,
+            }
+        )
+
+    return {
+        "task": "translate" if task == "ast" else "transcribe",
+        "language": result.language or "en",
+        "duration": result.duration if result.duration is not None else 0.0,
+        "text": result.text,
+        "segments": segments_out,
+        "words": list(result.words),
+    }
+
+
+def _segments_for_subtitles(result: TranscribeResult) -> list[dict]:
+    if result.segments:
+        return result.segments
+    # Fallback: one segment spanning the full audio duration.
+    end = result.duration if result.duration is not None else 0.0
+    return [{"id": 0, "start": 0.0, "end": end, "text": result.text}]
+
+
+def _format_srt_timestamp(seconds: float) -> str:
+    total_ms = int(round(seconds * 1000))
+    hours, rem = divmod(total_ms, 3_600_000)
+    minutes, rem = divmod(rem, 60_000)
+    secs, ms = divmod(rem, 1000)
+    return f"{hours:02d}:{minutes:02d}:{secs:02d},{ms:03d}"
+
+
+def _format_vtt_timestamp(seconds: float) -> str:
+    return _format_srt_timestamp(seconds).replace(",", ".")
+
+
+def _segments_to_srt(segments: list[dict]) -> str:
+    lines: list[str] = []
+    for idx, seg in enumerate(segments, start=1):
+        lines.append(str(idx))
+        lines.append(
+            f"{_format_srt_timestamp(seg['start'])} --> {_format_srt_timestamp(seg['end'])}"
+        )
+        lines.append(str(seg.get("text", "")).strip())
+        lines.append("")
+    return "\n".join(lines)
+
+
+def _segments_to_vtt(segments: list[dict]) -> str:
+    lines: list[str] = ["WEBVTT", ""]
+    for seg in segments:
+        lines.append(
+            f"{_format_vtt_timestamp(seg['start'])} --> {_format_vtt_timestamp(seg['end'])}"
+        )
+        lines.append(str(seg.get("text", "")).strip())
+        lines.append("")
+    return "\n".join(lines)
 
 
 def main() -> int:

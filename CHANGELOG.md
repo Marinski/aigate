@@ -2,6 +2,50 @@
 
 All notable changes to this project are documented here.
 
+## [v2.9.0] — 2026-05-26
+
+**`asr-canary` now returns OpenAI Whisper-shape `verbose_json` with segment + word timestamps for the multitask Canary models, plus `srt` / `vtt` subtitle formats.**
+
+Previously the wrapper accepted `response_format=verbose_json` for OpenAI compatibility but returned plain `{"text": …}` regardless — clients that depended on Whisper's `segments[]` / `words[]` arrays couldn't read timing data. This fixes that for the two backends that NeMo can timestamp: `canary-180m-flash` and `canary-1b-flash` (both `EncDecMultiTaskModel`). The SALM-based `canary-qwen-2.5b` is a chat LM under the hood and has no timestamp head — `verbose_json` requests still succeed but the `segments` / `words` arrays come back empty.
+
+Response shape matches OpenAI exactly so existing whisper-family clients work with no changes:
+
+```json
+{
+  "task": "transcribe",
+  "language": "en",
+  "duration": 2.43,
+  "text": "You are just a line of code",
+  "segments": [
+    {"id": 0, "seek": 0, "start": 0.0, "end": 1.68,
+     "text": "You are just a line of code",
+     "tokens": [], "temperature": 0.0,
+     "avg_logprob": null, "compression_ratio": null, "no_speech_prob": null}
+  ],
+  "words": [
+    {"word": "You",  "start": 0.0,  "end": 0.08},
+    {"word": "are",  "start": 0.4,  "end": 0.48},
+    {"word": "just", "start": 0.56, "end": 0.64},
+    {"word": "a",    "start": 0.8,  "end": 0.88},
+    {"word": "line", "start": 0.96, "end": 1.04},
+    {"word": "of",   "start": 1.2,  "end": 1.28},
+    {"word": "code", "start": 1.36, "end": 1.68}
+  ]
+}
+```
+
+Whisper-only fields (`avg_logprob`, `no_speech_prob`, `compression_ratio`, `tokens`) are null-filled rather than omitted so clients reading them don't crash. `temperature` is hardcoded to `0.0` (Canary is greedy-decoded).
+
+`srt` and `vtt` formats are built from the segments and returned as `text/plain` / `text/vtt` respectively. If the backend produces no segments (SALM, or an empty audio file), the wrapper falls back to a single segment spanning the full audio duration so the subtitle output is still valid.
+
+Implementation notes:
+
+- The wrapper takes an extra round through NeMo's `transcribe(timestamps=True)` only when the response format actually needs timing data (`verbose_json` / `srt` / `vtt`). Plain `json` / `text` paths skip the timestamp pass and stay fast.
+- LiteLLM proxies repeated form fields to single values — a client sending `timestamp_granularities[]=segment&timestamp_granularities[]=word` through the LiteLLM proxy arrives at the wrapper as just `['word']`. To dodge this footgun the wrapper always emits both segments and words regardless of `timestamp_granularities[]` selection. Clients that read only one are unaffected; the other field is essentially free for us since NeMo computes both in the same pass.
+- Audio duration is computed from the 16 kHz mono WAV the wrapper preprocesses the upload into (Python stdlib `wave`), so the `duration` field is always populated.
+
+Two new live e2e tests (`test_asr_canary_transcribe_verbose_json`, `test_asr_canary_transcribe_srt`) exercise the new formats end-to-end through the LiteLLM proxy. asr-canary suite: 8/8 green.
+
 ## [v2.8.0] — 2026-05-25
 
 **Add `vllm` — in-repo vLLM audio-LLM supervisor exposing transcribe + chat aliases for Qwen3-ASR + Voxtral.**

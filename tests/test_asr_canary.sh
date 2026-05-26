@@ -165,6 +165,80 @@ test_asr_canary_delete_unknown_returns_404() {
     echo "OK: asr_canary_delete_unknown_returns_404 (status=$code)"
 }
 
+# ── verbose_json with segment + word timestamps (multitask backends) ─────────
+
+test_asr_canary_transcribe_verbose_json() {
+    _asr_canary_enabled || { echo "  SKIP: ASR_CANARY not enabled"; return 0; }
+    local fixture=""
+    for ext in wav mp3 m4a flac ogg; do
+        if [ -f "tests/.fixtures/audio.${ext}" ]; then
+            fixture="tests/.fixtures/audio.${ext}"
+            break
+        fi
+    done
+    [ -n "$fixture" ] || { echo "  SKIP: tests/.fixtures/audio.{wav,mp3,m4a,flac,ogg} missing"; return 0; }
+
+    # 1b-flash has the most reliable timestamp output; fall back to 180m when CPU-only.
+    local model="local-asr-canary-180m-flash"
+    if [ "${ASR_CANARY_CUDA:-0}" = "1" ]; then
+        model="local-asr-canary-cuda-1b-flash"
+    fi
+
+    local out
+    out=$(curl -sf -m 180 -X POST "$BASE_URL/v1/audio/transcriptions" \
+        -H "$AUTH_HEADER" \
+        -F "file=@${fixture}" \
+        -F "model=${model}" \
+        -F "response_format=verbose_json" \
+        -F "timestamp_granularities[]=segment" \
+        -F "timestamp_granularities[]=word") || {
+        echo "  FAIL: POST /v1/audio/transcriptions verbose_json (model=$model)"
+        return 1
+    }
+    assert_contains "$out" "\"task\":" "verbose_json has task field" || return 1
+    assert_contains "$out" "\"language\":" "verbose_json has language field" || return 1
+    assert_contains "$out" "\"duration\":" "verbose_json has duration field" || return 1
+    assert_contains "$out" "\"text\":" "verbose_json has text field" || return 1
+    assert_contains "$out" "\"segments\":" "verbose_json has segments field" || return 1
+    assert_contains "$out" "\"words\":" "verbose_json has words field" || return 1
+
+    local n_segments n_words
+    n_segments=$(echo "$out" | jq '.segments | length' 2>/dev/null || echo 0)
+    n_words=$(echo "$out" | jq '.words | length' 2>/dev/null || echo 0)
+    echo "OK: asr_canary_transcribe_verbose_json (model=$model, segments=$n_segments, words=$n_words)"
+}
+
+# ── srt subtitle format built from segments ──────────────────────────────────
+
+test_asr_canary_transcribe_srt() {
+    _asr_canary_enabled || { echo "  SKIP: ASR_CANARY not enabled"; return 0; }
+    local fixture=""
+    for ext in wav mp3 m4a flac ogg; do
+        if [ -f "tests/.fixtures/audio.${ext}" ]; then
+            fixture="tests/.fixtures/audio.${ext}"
+            break
+        fi
+    done
+    [ -n "$fixture" ] || { echo "  SKIP: tests/.fixtures/audio.{wav,mp3,m4a,flac,ogg} missing"; return 0; }
+
+    local model="local-asr-canary-180m-flash"
+    if [ "${ASR_CANARY_CUDA:-0}" = "1" ]; then
+        model="local-asr-canary-cuda-1b-flash"
+    fi
+
+    local out
+    out=$(curl -sf -m 180 -X POST "$BASE_URL/v1/audio/transcriptions" \
+        -H "$AUTH_HEADER" \
+        -F "file=@${fixture}" \
+        -F "model=${model}" \
+        -F "response_format=srt") || {
+        echo "  FAIL: POST /v1/audio/transcriptions srt (model=$model)"
+        return 1
+    }
+    assert_contains "$out" "-->" "srt has timestamp arrows" || return 1
+    echo "OK: asr_canary_transcribe_srt (model=$model)"
+}
+
 ALL_TESTS+=(
     test_asr_canary_healthz
     test_asr_canary_models_list
@@ -172,4 +246,6 @@ ALL_TESTS+=(
     test_asr_canary_unload_all
     test_asr_canary_delete_unknown_returns_404
     test_asr_canary_transcribe_live
+    test_asr_canary_transcribe_verbose_json
+    test_asr_canary_transcribe_srt
 )

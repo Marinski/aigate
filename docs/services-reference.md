@@ -348,7 +348,7 @@ Source: `aigate/asr-canary/` (Python 3.12, FastAPI, `nemo-toolkit[asr]`).
 
 | Endpoint | URL | Description |
 | -------- | --- | ----------- |
-| Transcribe | `POST /v1/audio/transcriptions` | OpenAI-compatible multipart upload (`file`, `model`, `language`, `response_format`) |
+| Transcribe | `POST /v1/audio/transcriptions` | OpenAI-compatible multipart upload (`file`, `model`, `language`, `response_format`, `timestamp_granularities[]`) — supports `json`, `text`, `verbose_json`, `srt`, `vtt` |
 | List models | `GET /v1/models` | Configured model_ids from `models.json` / `models-cpu.json` |
 | Loaded models | `GET /api/ps` | Currently loaded backends + `idle_seconds` (speaches-compat) |
 | Unload one | `DELETE /api/ps/{model_id}` | Evict one model from RAM/VRAM (URL-encoded, speaches-compat) |
@@ -369,6 +369,7 @@ Source: `aigate/asr-canary/` (Python 3.12, FastAPI, `nemo-toolkit[asr]`).
 - **CUDA resource manager**: `local-asr-canary-cuda-*` aliases participate in the `cuda-stt` group. A competing CUDA job (LLM, image gen, TTS, other STT) triggers `DELETE /api/ps/{model_id}` for every loaded canary model before the job runs.
 - **CPU resource manager**: `local-asr-canary-180m-flash` participates in the `cpu-stt` group, evicted on competing CPU job arrival.
 - **Audio preprocessing**: any container/codec is ffmpeg-converted to 16 kHz mono WAV before NeMo sees it.
+- **Timestamps (OpenAI-shape `verbose_json`)**: `canary-180m-flash` and `canary-1b-flash` (multitask backends) emit segment + word timestamps via NeMo's `timestamps=True`. The wrapper normalizes the output to the same shape Whisper returns (`{task, language, duration, text, segments:[{id,start,end,text,…}], words:[{word,start,end}]}`), null-filling whisper-only fields (`avg_logprob`, `no_speech_prob`, `compression_ratio`, `tokens`). `srt` and `vtt` formats are built from the segments. `canary-qwen-2.5b` (SALM backend) is text-only — `verbose_json` requests succeed but return empty `segments` / `words`. LiteLLM proxies repeated form fields to single values, so the wrapper always emits both segments and words regardless of `timestamp_granularities[]` selection.
 
 ### Environment variables
 
