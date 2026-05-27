@@ -11,18 +11,22 @@ general_settings:
     ttl: 600
 
   telemetry: false
-  request_timeout: 600
+  # Effectively unbounded — long CPU transcriptions can take hours, long
+  # context completions on slow upstreams can take many minutes. We rely
+  # on the *client* to cancel if it doesn't want to wait, not on a server
+  # cutoff that murders in-progress inference.
+  request_timeout: 86400
   drop_params: true
 
 litellm_settings:
   drop_params: true
   num_retries: 3
-  request_timeout: 600
+  request_timeout: 86400
   enable_json_schema_validation: true
   callbacks: ["callbacks.resource_manager.proxy_handler_instance"]
 
 router_settings:
   routing_strategy: latency-based-routing
   num_retries: 3
-  timeout: 600
+  timeout: 86400
   retry_after: 5

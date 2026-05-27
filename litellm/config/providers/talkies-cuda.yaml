@@ -1,0 +1,55 @@
+- model_name: local-talkies-cuda-whisper-large-v3
+  litellm_params:
+    model: openai/whisper-large-v3
+    api_base: http://talkies-cuda:8000/v1
+    api_key: none
+  model_info:
+    mode: audio_transcription
+
+- model_name: local-talkies-cuda-whisper-large-v3-turbo
+  litellm_params:
+    model: openai/whisper-large-v3-turbo
+    api_base: http://talkies-cuda:8000/v1
+    api_key: none
+  model_info:
+    mode: audio_transcription
+
+- model_name: local-talkies-cuda-distil-whisper-large-v3
+  litellm_params:
+    model: openai/distil-whisper-large-v3
+    api_base: http://talkies-cuda:8000/v1
+    api_key: none
+  model_info:
+    mode: audio_transcription
+
+- model_name: local-talkies-cuda-parakeet-tdt-0.6b-v3
+  litellm_params:
+    model: openai/parakeet-tdt-0.6b-v3
+    api_base: http://talkies-cuda:8000/v1
+    api_key: none
+  model_info:
+    mode: audio_transcription
+
+- model_name: local-talkies-cuda-canary-180m-flash
+  litellm_params:
+    model: openai/canary-180m-flash
+    api_base: http://talkies-cuda:8000/v1
+    api_key: none
+  model_info:
+    mode: audio_transcription
+
+- model_name: local-talkies-cuda-canary-1b-flash
+  litellm_params:
+    model: openai/canary-1b-flash
+    api_base: http://talkies-cuda:8000/v1
+    api_key: none
+  model_info:
+    mode: audio_transcription
+
+- model_name: local-talkies-cuda-canary-qwen-2.5b
+  litellm_params:
+    model: openai/canary-qwen-2.5b
+    api_base: http://talkies-cuda:8000/v1
+    api_key: none
+  model_info:
+    mode: audio_transcription

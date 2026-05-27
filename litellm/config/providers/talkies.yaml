@@ -1,0 +1,31 @@
+- model_name: local-talkies-whisper-large-v3
+  litellm_params:
+    model: openai/whisper-large-v3
+    api_base: http://talkies:8000/v1
+    api_key: none
+  model_info:
+    mode: audio_transcription
+
+- model_name: local-talkies-whisper-large-v3-turbo
+  litellm_params:
+    model: openai/whisper-large-v3-turbo
+    api_base: http://talkies:8000/v1
+    api_key: none
+  model_info:
+    mode: audio_transcription
+
+- model_name: local-talkies-distil-whisper-large-v3
+  litellm_params:
+    model: openai/distil-whisper-large-v3
+    api_base: http://talkies:8000/v1
+    api_key: none
+  model_info:
+    mode: audio_transcription
+
+- model_name: local-talkies-canary-180m-flash
+  litellm_params:
+    model: openai/canary-180m-flash
+    api_base: http://talkies:8000/v1
+    api_key: none
+  model_info:
+    mode: audio_transcription

@@ -509,6 +509,145 @@ services:
     networks:
       - aigate-public
 
+  # ── talkies (unified ASR — Whisper + Canary-180m, CPU) ─────────────────────
+
+  talkies:
+    profiles: ["talkies"]
+    build:
+      context: ./talkies
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    mem_limit: ${TALKIES_MEM_LIMIT:-8g}
+    memswap_limit: ${TALKIES_MEMSWAP_LIMIT:-16g}
+    cpus: ${TALKIES_CPUS:-4.0}
+    environment:
+      TALKIES_DEVICE: cpu
+      TALKIES_MODEL_TTL: ${TALKIES_MODEL_TTL:-10m}
+      TALKIES_SWEEPER_INTERVAL: ${TALKIES_SWEEPER_INTERVAL:-1m}
+      TALKIES_LOAD_TIMEOUT: ${TALKIES_LOAD_TIMEOUT:-5m}
+      TALKIES_MAX_UPLOAD_BYTES: ${TALKIES_MAX_UPLOAD_BYTES:-104857600}
+      TALKIES_LOG_LEVEL: ${TALKIES_LOG_LEVEL:-INFO}
+      TALKIES_PRELOAD: ${TALKIES_PRELOAD:-}
+      TALKIES_PREFETCH: ${TALKIES_PREFETCH:-}
+      TALKIES_VAD_CHUNK_THRESHOLD: ${TALKIES_VAD_CHUNK_THRESHOLD:-30}
+      TALKIES_VAD_MAX_SPEECH: ${TALKIES_VAD_MAX_SPEECH:-28}
+    volumes:
+      - ${DATA_DIR_TALKIES:-${DATA_DIR:-.data}/talkies}:/data/hf/hub
+    depends_on:
+      talkies-pull:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz')\""]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - aigate-internal
+
+  # ── talkies CUDA (unified ASR — Whisper + Parakeet + all Canary, GPU) ──────
+
+  talkies-cuda:
+    profiles: ["talkies-cuda"]
+    build:
+      context: ./talkies
+      dockerfile: Dockerfile.cuda
+    restart: unless-stopped
+    mem_limit: ${TALKIES_CUDA_MEM_LIMIT:-12g}
+    memswap_limit: ${TALKIES_CUDA_MEMSWAP_LIMIT:-24g}
+    cpus: ${TALKIES_CUDA_CPUS:-4.0}
+    environment:
+      TALKIES_DEVICE: cuda
+      TALKIES_MODEL_TTL: ${TALKIES_CUDA_MODEL_TTL:-10m}
+      TALKIES_SWEEPER_INTERVAL: ${TALKIES_CUDA_SWEEPER_INTERVAL:-1m}
+      TALKIES_LOAD_TIMEOUT: ${TALKIES_CUDA_LOAD_TIMEOUT:-5m}
+      TALKIES_MAX_UPLOAD_BYTES: ${TALKIES_CUDA_MAX_UPLOAD_BYTES:-104857600}
+      TALKIES_LOG_LEVEL: ${TALKIES_CUDA_LOG_LEVEL:-INFO}
+      TALKIES_PRELOAD: ${TALKIES_CUDA_PRELOAD:-}
+      TALKIES_PREFETCH: ${TALKIES_CUDA_PREFETCH:-}
+      TALKIES_VAD_CHUNK_THRESHOLD: ${TALKIES_CUDA_VAD_CHUNK_THRESHOLD:-30}
+      TALKIES_VAD_MAX_SPEECH: ${TALKIES_CUDA_VAD_MAX_SPEECH:-28}
+    volumes:
+      - ${DATA_DIR_TALKIES:-${DATA_DIR:-.data}/talkies}:/data/hf/hub
+    depends_on:
+      talkies-cuda-pull:
+        condition: service_completed_successfully
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz')\""]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - aigate-internal
+
+  # ── talkies pull (download CPU models into HF cache at start) ──────────────
+
+  talkies-pull:
+    profiles: ["talkies"]
+    image: python:3.12-slim-bookworm@sha256:d193c6f51a7dbd10395d6328de3a7edb0516fb0608ca138036576f574c3e07d2
+    restart: "no"
+    mem_limit: ${TALKIES_PULL_MEM_LIMIT:-2g}
+    memswap_limit: ${TALKIES_PULL_MEMSWAP_LIMIT:-4g}
+    cpus: ${TALKIES_PULL_CPUS:-2.0}
+    environment:
+      HF_HOME: /data/hf
+    entrypoint:
+      - sh
+      - -c
+      - |
+        set -eu
+        pip install --quiet --no-cache-dir "huggingface-hub==0.35.3"
+        huggingface-cli download --max-workers 1 Systran/faster-whisper-large-v3
+        huggingface-cli download --max-workers 1 deepdml/faster-whisper-large-v3-turbo-ct2
+        huggingface-cli download --max-workers 1 Systran/faster-distil-whisper-large-v3
+        huggingface-cli download --max-workers 1 nvidia/canary-180m-flash
+    volumes:
+      - ${DATA_DIR_TALKIES:-${DATA_DIR:-.data}/talkies}:/data/hf/hub
+    networks:
+      - aigate-public
+
+  # ── talkies-cuda pull (download all CUDA models into HF cache) ─────────────
+
+  talkies-cuda-pull:
+    profiles: ["talkies-cuda"]
+    image: python:3.12-slim-bookworm@sha256:d193c6f51a7dbd10395d6328de3a7edb0516fb0608ca138036576f574c3e07d2
+    restart: "no"
+    mem_limit: ${TALKIES_CUDA_PULL_MEM_LIMIT:-4g}
+    memswap_limit: ${TALKIES_CUDA_PULL_MEMSWAP_LIMIT:-8g}
+    cpus: ${TALKIES_CUDA_PULL_CPUS:-2.0}
+    environment:
+      HF_HOME: /data/hf
+    entrypoint:
+      - sh
+      - -c
+      - |
+        set -eu
+        pip install --quiet --no-cache-dir "huggingface-hub==0.35.3"
+        huggingface-cli download --max-workers 1 Systran/faster-whisper-large-v3
+        huggingface-cli download --max-workers 1 deepdml/faster-whisper-large-v3-turbo-ct2
+        huggingface-cli download --max-workers 1 Systran/faster-distil-whisper-large-v3
+        huggingface-cli download --max-workers 1 nvidia/parakeet-tdt-0.6b-v3
+        huggingface-cli download --max-workers 1 nvidia/canary-180m-flash
+        huggingface-cli download --max-workers 1 nvidia/canary-1b-flash
+        huggingface-cli download --max-workers 1 nvidia/canary-qwen-2.5b
+        huggingface-cli download --max-workers 1 Qwen/Qwen3-1.7B
+    volumes:
+      - ${DATA_DIR_TALKIES:-${DATA_DIR:-.data}/talkies}:/data/hf/hub
+    networks:
+      - aigate-public
+
   # ── vllm CUDA (vLLM audio-LLM wrapper — Qwen3-ASR / Voxtral / Granite) ──
 
   vllm-cuda:
@@ -1263,8 +1402,8 @@ configs:
               proxy_set_header X-Real-IP $$remote_addr;
               proxy_set_header X-Forwarded-For $$proxy_add_x_forwarded_for;
               proxy_set_header X-Forwarded-Proto $$scheme;
-              proxy_read_timeout ${TIMEOUT_CLAUDEBOX:-600s};
-              proxy_send_timeout ${TIMEOUT_CLAUDEBOX:-600s};
+              proxy_read_timeout ${TIMEOUT_CLAUDEBOX:-24h};
+              proxy_send_timeout ${TIMEOUT_CLAUDEBOX:-24h};
               proxy_buffering off;
               proxy_cache off;
           }
@@ -1279,8 +1418,8 @@ configs:
               proxy_set_header X-Real-IP $$remote_addr;
               proxy_set_header X-Forwarded-For $$proxy_add_x_forwarded_for;
               proxy_set_header X-Forwarded-Proto $$scheme;
-              proxy_read_timeout ${TIMEOUT_CLAUDEBOX:-600s};
-              proxy_send_timeout ${TIMEOUT_CLAUDEBOX:-600s};
+              proxy_read_timeout ${TIMEOUT_CLAUDEBOX:-24h};
+              proxy_send_timeout ${TIMEOUT_CLAUDEBOX:-24h};
               proxy_buffering off;
               proxy_cache off;
           }
@@ -1295,8 +1434,8 @@ configs:
               proxy_set_header X-Real-IP $$remote_addr;
               proxy_set_header X-Forwarded-For $$proxy_add_x_forwarded_for;
               proxy_set_header X-Forwarded-Proto $$scheme;
-              proxy_read_timeout ${TIMEOUT_PREDICTALOT:-600s};
-              proxy_send_timeout ${TIMEOUT_PREDICTALOT:-600s};
+              proxy_read_timeout ${TIMEOUT_PREDICTALOT:-24h};
+              proxy_send_timeout ${TIMEOUT_PREDICTALOT:-24h};
               proxy_buffering off;
               proxy_cache off;
           }
@@ -1357,8 +1496,8 @@ configs:
               proxy_http_version 1.1;
               proxy_set_header Upgrade $$http_upgrade;
               proxy_set_header Connection "upgrade";
-              proxy_read_timeout ${TIMEOUT_LIBRECHAT:-600s};
-              proxy_send_timeout ${TIMEOUT_LIBRECHAT:-600s};
+              proxy_read_timeout ${TIMEOUT_LIBRECHAT:-24h};
+              proxy_send_timeout ${TIMEOUT_LIBRECHAT:-24h};
               proxy_buffering off;
               proxy_cache off;
               client_max_body_size ${LIBRECHAT_MAX_BODY_SIZE:-25m};
@@ -1427,8 +1566,8 @@ configs:
               proxy_set_header X-Real-IP $$remote_addr;
               proxy_set_header X-Forwarded-For $$proxy_add_x_forwarded_for;
               proxy_set_header X-Forwarded-Proto $$scheme;
-              proxy_read_timeout ${TIMEOUT_API:-600s};
-              proxy_send_timeout ${TIMEOUT_API:-600s};
+              proxy_read_timeout ${TIMEOUT_API:-24h};
+              proxy_send_timeout ${TIMEOUT_API:-24h};
               proxy_buffering off;
               proxy_cache off;
           }

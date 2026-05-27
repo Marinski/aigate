@@ -82,6 +82,16 @@ ifeq ($(strip $(ASR_CANARY_CUDA)),1)
   _PROFILES += asr-canary-cuda
 endif
 
+# talkies: opt-in with TALKIES=1 (CPU — whisper + canary-180m, VAD-chunked)
+ifeq ($(strip $(TALKIES)),1)
+  _PROFILES += talkies
+endif
+
+# talkies CUDA: opt-in with TALKIES_CUDA=1 (GPU — whisper + parakeet + all canary)
+ifeq ($(strip $(TALKIES_CUDA)),1)
+  _PROFILES += talkies-cuda
+endif
+
 # vllm CUDA: opt-in with VLLM_CUDA=1
 ifeq ($(strip $(VLLM_CUDA)),1)
   _PROFILES += vllm-cuda
@@ -141,6 +151,12 @@ ifeq ($(strip $(ASR_CANARY)),1)
   _HAS_MCP := 1
 endif
 ifeq ($(strip $(ASR_CANARY_CUDA)),1)
+  _HAS_MCP := 1
+endif
+ifeq ($(strip $(TALKIES)),1)
+  _HAS_MCP := 1
+endif
+ifeq ($(strip $(TALKIES_CUDA)),1)
   _HAS_MCP := 1
 endif
 ifeq ($(strip $(VLLM_CUDA)),1)
@@ -203,7 +219,7 @@ run-bg:
 	docker compose up -d --build --force-recreate
 
 down:
-	COMPOSE_PROFILES=claudebox,pibox-zai,cloudflared,hybrids3,browser,ollama,ollama-cuda,sdcpp,sdcpp-cuda,speaches,speaches-cuda,asr-canary,asr-canary-cuda,vllm-cuda,qwen3-cuda-tts,mcp,librechat,searxng,telethon,tailscale,predictalot,predictalot-cuda,mailbox \
+	COMPOSE_PROFILES=claudebox,pibox-zai,cloudflared,hybrids3,browser,ollama,ollama-cuda,sdcpp,sdcpp-cuda,speaches,speaches-cuda,asr-canary,asr-canary-cuda,talkies,talkies-cuda,vllm-cuda,qwen3-cuda-tts,mcp,librechat,searxng,telethon,tailscale,predictalot,predictalot-cuda,mailbox \
 		docker compose down --remove-orphans
 
 restart: down run-bg
@@ -246,6 +262,8 @@ help:
 	@echo "  speaches-cuda set SPEACHES_CUDA=1 (NVIDIA GPU STT)"
 	@echo "  asr-canary    set ASR_CANARY=1 (CPU NeMo Canary 180m-flash STT)"
 	@echo "  asr-canary-cuda set ASR_CANARY_CUDA=1 (NVIDIA GPU NeMo Canary STT — all 3 models)"
+	@echo "  talkies       set TALKIES=1 (CPU unified ASR — whisper + canary-180m, VAD-chunked)"
+	@echo "  talkies-cuda  set TALKIES_CUDA=1 (GPU unified ASR — whisper + parakeet + all canary)"
 	@echo "  vllm-cuda  set VLLM_CUDA=1 (NVIDIA GPU vLLM audio-LLM — Qwen3-ASR / Voxtral / Granite-Speech)"
 	@echo "  qwen-tts-cuda set QWEN_TTS_CUDA=1 (NVIDIA GPU TTS)"
 	@echo "  librechat     set LIBRECHAT=1"

@@ -14,6 +14,7 @@ Groups (CUDA):
   cuda-tts          : local-qwen3-cuda-tts
   cuda-stt-speaches : local-speaches-cuda-*
   cuda-stt-canary   : local-asr-canary-cuda-*
+  cuda-stt-talkies  : local-talkies-cuda-*
   cuda-vllm     : local-vllm-cuda-*  (audio-LLMs: Qwen3-ASR / Voxtral / Granite-Speech)
 
 Groups (CPU):
@@ -22,6 +23,7 @@ Groups (CPU):
   cpu-tts           : local-speaches-kokoro-tts
   cpu-stt-speaches  : local-speaches-whisper-*, local-speaches-parakeet-*
   cpu-stt-canary    : local-asr-canary-*
+  cpu-stt-talkies   : local-talkies-*
 
 The three CUDA STT services are split into separate groups so they evict each
 other (all compete for the same VRAM). Within each service, the wrapper
@@ -67,6 +69,11 @@ _CUDA_STT_CANARY = {
 # map onto the same supervised vllm-serve subprocess, so they share one group.
 _VLLM_CUDA_PREFIX = "local-vllm-cuda-"
 
+# talkies — unified ASR (whisper + parakeet + canary). Both CPU and CUDA
+# variants share `local-talkies-` prefix; CUDA adds `cuda-` infix.
+_TALKIES_CUDA_PREFIX = "local-talkies-cuda-"
+_TALKIES_CPU_PREFIX = "local-talkies-"
+
 _CPU_TTS = {"local-speaches-kokoro-tts"}
 _CPU_STT_SPEACHES = {
     "local-speaches-whisper-distil-large-v3",
@@ -84,6 +91,7 @@ _ALL_CUDA_GROUPS = {
     "cuda-tts",
     "cuda-stt-speaches",
     "cuda-stt-canary",
+    "cuda-stt-talkies",
     "cuda-vllm",
 }
 _ALL_CPU_GROUPS = {
@@ -92,6 +100,7 @@ _ALL_CPU_GROUPS = {
     "cpu-tts",
     "cpu-stt-speaches",
     "cpu-stt-canary",
+    "cpu-stt-talkies",
 }
 
 
@@ -112,6 +121,11 @@ def _get_group(model: str) -> Optional[str]:
         return "cuda-stt-canary"
     if model.startswith(_VLLM_CUDA_PREFIX):
         return "cuda-vllm"
+    # talkies CUDA must be checked before CPU (longer prefix wins)
+    if model.startswith(_TALKIES_CUDA_PREFIX):
+        return "cuda-stt-talkies"
+    if model.startswith(_TALKIES_CPU_PREFIX):
+        return "cpu-stt-talkies"
     if model in _CPU_TTS:
         return "cpu-tts"
     if model in _CPU_STT_SPEACHES:
@@ -250,11 +264,36 @@ _VLLM_CUDA_MODELS = [
     "voxtral-mini-3b",
 ]
 
+# talkies — unified ASR; DELETE /api/ps/{model_id} per model. CUDA has the
+# full set, CPU a subset (whisper variants + canary-180m-flash only).
+_TALKIES_CUDA_URL = "http://talkies-cuda:8000"
+_TALKIES_CPU_URL = "http://talkies:8000"
+_TALKIES_CUDA_MODELS = [
+    "whisper-large-v3",
+    "whisper-large-v3-turbo",
+    "distil-whisper-large-v3",
+    "parakeet-tdt-0.6b-v3",
+    "canary-180m-flash",
+    "canary-1b-flash",
+    "canary-qwen-2.5b",
+]
+_TALKIES_CPU_MODELS = [
+    "whisper-large-v3",
+    "whisper-large-v3-turbo",
+    "distil-whisper-large-v3",
+    "canary-180m-flash",
+]
+
 
 async def _unload_speaches_models(base_url: str, group: str, model_ids: list) -> None:
-    """Unload models from a speaches instance via DELETE /api/ps/{model_id}."""
+    """Unload models from a speaches-style instance in parallel via DELETE
+    /api/ps/{model_id}. Sequential calls compounded the pre-transcribe
+    latency badly (one slow service blocked every subsequent unload); fan
+    them out so the whole group's eviction is bounded by the slowest single
+    response, not the sum.
+    """
     async with httpx.AsyncClient(timeout=10.0) as client:
-        for model_id in model_ids:
+        async def _one(model_id: str) -> None:
             encoded = model_id.replace("/", "%2F")
             try:
                 r = await client.delete(f"{base_url}/api/ps/{encoded}")
@@ -280,6 +319,8 @@ async def _unload_speaches_models(base_url: str, group: str, model_ids: list) ->
                     "[resource_manager] %s: unload error for %s: %s", group, model_id, e
                 )
 
+        await asyncio.gather(*(_one(mid) for mid in model_ids), return_exceptions=True)
+
 
 async def _unload_cuda_stt_speaches():
     """Unload CUDA STT models from speaches-cuda to free VRAM."""
@@ -302,6 +343,22 @@ async def _unload_vllm_cuda():
     logger.warning("[resource_manager] unloading cuda-vllm subprocess")
     await _unload_speaches_models(
         _VLLM_CUDA_URL, "cuda-vllm", _VLLM_CUDA_MODELS
+    )
+
+
+async def _unload_cuda_stt_talkies():
+    """Unload CUDA STT models from talkies-cuda to free VRAM."""
+    logger.warning("[resource_manager] unloading cuda-stt-talkies models")
+    await _unload_speaches_models(
+        _TALKIES_CUDA_URL, "cuda-stt-talkies", _TALKIES_CUDA_MODELS
+    )
+
+
+async def _unload_cpu_stt_talkies():
+    """Unload CPU STT models from talkies to free RAM."""
+    logger.warning("[resource_manager] unloading cpu-stt-talkies models")
+    await _unload_speaches_models(
+        _TALKIES_CPU_URL, "cpu-stt-talkies", _TALKIES_CPU_MODELS
     )
 
 
@@ -335,12 +392,14 @@ _UNLOAD_FNS = {
     "cuda-tts": _unload_cuda_tts,
     "cuda-stt-speaches": _unload_cuda_stt_speaches,
     "cuda-stt-canary": _unload_cuda_stt_canary,
+    "cuda-stt-talkies": _unload_cuda_stt_talkies,
     "cuda-vllm": _unload_vllm_cuda,
     "cpu-llm": _unload_cpu_llm,
     "cpu-img": _unload_cpu_img,
     "cpu-tts": _unload_cpu_tts,
     "cpu-stt-speaches": _unload_cpu_stt_speaches,
     "cpu-stt-canary": _unload_cpu_stt_canary,
+    "cpu-stt-talkies": _unload_cpu_stt_talkies,
 }
 
 # ---------------------------------------------------------------------------
@@ -351,6 +410,18 @@ _cuda_sem = asyncio.Semaphore(1)
 _cpu_sem = asyncio.Semaphore(1)
 
 _METADATA_KEY = "_resource_manager_holds_sem"
+
+# Contextvar tracks the held-semaphore for the current request task. Survives
+# the trip from pre_call_hook → handler → log_success_event, including paths
+# where LiteLLM's standard-logging chain dies mid-flight (e.g. trying to
+# pydantic-serialize a Response subclass) and never invokes the release hook.
+# Both the raw-text response patch AND the standard log_success_event read
+# this and use sentinel-clearing so we never double-release.
+import contextvars  # noqa: E402
+
+_held_hw: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
+    "resource_manager_held_hw", default=None
+)
 
 
 def _get_sem(group: str) -> Optional[asyncio.Semaphore]:
@@ -385,6 +456,13 @@ class ResourceManager(CustomLogger):
             group,
         )
 
+        # Inference paths have no business being killed by some 10-minute
+        # default. CPU transcriptions can take hours; long-context LLM
+        # completions can take many minutes. Override LiteLLM's hardcoded
+        # 600s default whenever the client didn't explicitly pass one.
+        if data.get("timeout") in (None, 600, 600.0):
+            data["timeout"] = 86400
+
         if group is None:
             return data
 
@@ -399,6 +477,7 @@ class ResourceManager(CustomLogger):
                 "[resource_manager] acquired %s semaphore for group=%s", hw, group
             )
             data.setdefault("metadata", {})[_METADATA_KEY] = hw
+            _held_hw.set(hw)
 
         if group in _ALL_CUDA_GROUPS:
             competing = _ALL_CUDA_GROUPS - {group}
@@ -435,28 +514,74 @@ class ResourceManager(CustomLogger):
 
     @staticmethod
     def _release_sem(kwargs):
-        hw = (kwargs.get("litellm_params") or {}).get("metadata", {}).get(_METADATA_KEY)
+        # Prefer the contextvar (set in pre_call_hook on the same async task)
+        # over kwargs.litellm_params.metadata — LiteLLM doesn't always
+        # propagate user-set data.metadata into kwargs.litellm_params.metadata,
+        # but the contextvar follows the task naturally.
+        hw = _held_hw.get()
+        if hw is None:
+            hw = (kwargs.get("litellm_params") or {}).get("metadata", {}).get(_METADATA_KEY)
         if hw is None:
             return
         sem = _cuda_sem if hw == "CUDA" else _cpu_sem
-        sem.release()
-        logger.warning("[resource_manager] released %s semaphore", hw)
+        # Clear contextvar BEFORE release so a concurrent path can't see the
+        # same hw and double-release.
+        _held_hw.set(None)
+        try:
+            sem.release()
+            logger.warning("[resource_manager] released %s semaphore", hw)
+        except ValueError:
+            # Already released (e.g. raw-text path beat us to it). No-op.
+            pass
 
 
 # ---------------------------------------------------------------------------
-# LiteLLM whisper_transformation patch
+# LiteLLM transcription patches — make all internal STT services return
+# proper OpenAI-shaped responses regardless of requested format.
 #
-# LiteLLM's OpenAIWhisperAudioTranscriptionConfig.transform_audio_transcription_request rewrites
-# response_format=json|text → verbose_json unconditionally ("ensures 'duration'
-# is received - used for cost calculation"). Speaches' parakeet executor
-# refuses verbose_json. Patch skips the rewrite for models that don't support
-# it; the client's chosen response_format passes through untouched.
+# By default LiteLLM:
+#   1. Rewrites response_format=text|json → verbose_json on the REQUEST side
+#      ("ensures 'duration' is received - used for cost calculation"). This
+#      breaks speaches' parakeet executor (refuses verbose_json) AND clobbers
+#      the client's choice of `text` vs `json`.
+#   2. Wraps raw-text RESPONSES (srt/vtt/text) into a JSON envelope
+#      `{"text": "<raw body>", "usage": null}` instead of passing them
+#      through as the correct Content-Type body the OpenAI HTTP API
+#      specifies (text/plain, application/x-subrip, text/vtt).
+#
+# Both behaviours are wrong for our internal STT services (talkies,
+# asr-canary, speaches) — all of them implement the full OpenAI shape
+# natively. The patches below:
+#   - skip request rewrite for `local-talkies-*`, `local-asr-canary-*`,
+#     `local-speaches-*` so client format passes through to the backend
+#   - intercept the response and, when format is text/srt/vtt, return a
+#     FastAPI PlainTextResponse with the proper media_type so the client
+#     sees raw body bytes instead of a JSON envelope
 # ---------------------------------------------------------------------------
 
-_NO_VERBOSE_JSON_SUBSTRINGS = ("parakeet",)
+# Substring match against the *backend* model name (i.e. after the
+# `openai/` prefix is stripped — e.g. `whisper-large-v3`, `canary-180m-flash`,
+# `parakeet-tdt-0.6b-v3`). All talkies/asr-canary/speaches models match.
+_NATIVE_FORMAT_SUBSTRINGS = (
+    "parakeet",
+    "whisper",
+    "canary",
+    "distil-whisper",
+)
+
+_RAW_TEXT_FORMATS = {
+    "text": "text/plain; charset=utf-8",
+    "srt": "application/x-subrip; charset=utf-8",
+    "vtt": "text/vtt; charset=utf-8",
+}
 
 
-def _patch_whisper_transformation() -> None:
+def _is_native_format_model(model: str | None) -> bool:
+    model_lc = (model or "").lower()
+    return any(s in model_lc for s in _NATIVE_FORMAT_SUBSTRINGS)
+
+
+def _patch_whisper_transformation_request() -> None:
     try:
         from litellm.llms.openai.transcriptions.whisper_transformation import (
             OpenAIWhisperAudioTranscriptionConfig,
@@ -466,34 +591,139 @@ def _patch_whisper_transformation() -> None:
         )
     except Exception as e:  # noqa: BLE001
         logger.warning(
-            "[resource_manager] whisper_transformation patch skipped (import failed): %s",
+            "[resource_manager] whisper_transformation request-patch skipped (import failed): %s",
             e,
         )
         return
 
     _orig = OpenAIWhisperAudioTranscriptionConfig.transform_audio_transcription_request
 
-    def _patched(
-        self,
-        model,
-        audio_file,
-        optional_params,
-        litellm_params,
-    ):
-        model_lc = (model or "").lower()
-        if any(s in model_lc for s in _NO_VERBOSE_JSON_SUBSTRINGS):
+    def _patched(self, model, audio_file, optional_params, litellm_params):
+        if _is_native_format_model(model):
             data = {"model": model, "file": audio_file, **optional_params}
             return AudioTranscriptionRequestData(data=data)
         return _orig(self, model, audio_file, optional_params, litellm_params)
 
     OpenAIWhisperAudioTranscriptionConfig.transform_audio_transcription_request = _patched
     logger.warning(
-        "[resource_manager] patched OpenAIWhisperAudioTranscriptionConfig: skip verbose_json rewrite for %s",
-        _NO_VERBOSE_JSON_SUBSTRINGS,
+        "[resource_manager] patched OpenAIWhisperAudioTranscriptionConfig: skip "
+        "verbose_json rewrite for models matching %s",
+        _NATIVE_FORMAT_SUBSTRINGS,
     )
 
 
-_patch_whisper_transformation()
+class _RawTextTranscription:
+    """Sentinel that satisfies both LiteLLM's `isinstance(_, TranscriptionResponse)`
+    type check and FastAPI's `isinstance(_, Response)` short-circuit.
+
+    LiteLLM's `litellm.main.atranscription` hard-asserts the upstream call
+    returns a TranscriptionResponse. FastAPI returns Response subclasses as
+    raw HTTP bodies (bypassing JSON serialization). A class that is BOTH
+    lets us pass through raw SRT/VTT/text bodies end-to-end without
+    rewriting LiteLLM's router or proxy layer.
+
+    Built lazily at first use so the imports happen inside the proxy process.
+    """
+
+    _cls = None
+
+    @classmethod
+    def make(cls, raw_text: str, media_type: str):
+        if cls._cls is None:
+            from litellm.types.utils import TranscriptionResponse
+            from starlette.responses import PlainTextResponse
+
+            class _Hybrid(PlainTextResponse, TranscriptionResponse):
+                def __init__(self, raw_text: str, media_type: str):  # noqa: D401
+                    PlainTextResponse.__init__(
+                        self, content=raw_text, media_type=media_type
+                    )
+                    # LiteLLM's success logger pokes at pydantic internals
+                    # (__pydantic_extra__, __pydantic_fields_set__, etc.)
+                    # when constructing the standard_logging_payload. Without
+                    # these, the success-call hook chain blows up with an
+                    # AttributeError and never releases the semaphore.
+                    object.__setattr__(self, "text", raw_text)
+                    object.__setattr__(self, "usage", None)
+                    object.__setattr__(self, "_hidden_params", {})
+                    object.__setattr__(self, "__pydantic_extra__", {})
+                    object.__setattr__(self, "__pydantic_fields_set__", set())
+                    object.__setattr__(self, "__pydantic_private__", None)
+
+                def __setattr__(self, name, value):
+                    # Bypass pydantic validation (LiteLLM mutates ._hidden_params)
+                    object.__setattr__(self, name, value)
+
+            cls._cls = _Hybrid
+        return cls._cls(raw_text, media_type)
+
+
+def _patch_handler_for_raw_text_response() -> None:
+    """Make async_audio_transcriptions return a hybrid PlainTextResponse /
+    TranscriptionResponse for raw-text formats (text/srt/vtt). The hybrid
+    passes LiteLLM's internal isinstance check AND, because it is also a
+    starlette Response, gets returned as a raw HTTP body by FastAPI with
+    the proper media_type — no JSON wrapping.
+    """
+    try:
+        from litellm.llms.openai.transcriptions.handler import OpenAIAudioTranscription
+    except Exception as e:  # noqa: BLE001
+        logger.warning(
+            "[resource_manager] handler raw-text patch skipped (import failed): %s",
+            e,
+        )
+        return
+
+    _orig_async = OpenAIAudioTranscription.async_audio_transcriptions
+
+    async def _patched_async(self, audio_file, data, model_response, timeout, *args, **kwargs):
+        result = await _orig_async(
+            self, audio_file, data, model_response, timeout, *args, **kwargs
+        )
+
+        fmt = (data.get("response_format") or "").lower()
+        media_type = _RAW_TEXT_FORMATS.get(fmt)
+        if media_type is None:
+            return result
+
+        if not _is_native_format_model(data.get("model")):
+            return result
+
+        raw = getattr(result, "text", None)
+        if not isinstance(raw, str):
+            return result
+
+        # FastAPI returns Response subclasses straight through without
+        # invoking LiteLLM's post-call logging hooks reliably (the standard
+        # logging payload chokes on non-pydantic responses anyway). Release
+        # the semaphore manually via the contextvar; clearing the var first
+        # prevents the standard hook from double-releasing if it does fire.
+        hw = _held_hw.get()
+        if hw is not None:
+            _held_hw.set(None)
+            sem = _cuda_sem if hw == "CUDA" else _cpu_sem
+            try:
+                sem.release()
+                logger.warning(
+                    "[resource_manager] released %s semaphore (raw-text path)", hw
+                )
+            except ValueError:
+                pass
+        # Also drop the metadata marker for belt-and-suspenders.
+        meta = data.get("metadata") or {}
+        meta.pop(_METADATA_KEY, None)
+
+        return _RawTextTranscription.make(raw, media_type)
+
+    OpenAIAudioTranscription.async_audio_transcriptions = _patched_async
+    logger.warning(
+        "[resource_manager] patched OpenAIAudioTranscription.async_audio_transcriptions: "
+        "return hybrid Response/TranscriptionResponse for text/srt/vtt on native-format models"
+    )
+
+
+_patch_whisper_transformation_request()
+_patch_handler_for_raw_text_response()
 
 
 # LiteLLM proxy loads this when config references the module

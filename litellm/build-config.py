@@ -97,6 +97,8 @@ def active_providers(env):
         ("speaches-cuda",  lambda e: is_flag(e, "SPEACHES_CUDA")),
         ("asr-canary",     lambda e: is_flag(e, "ASR_CANARY")),
         ("asr-canary-cuda", lambda e: is_flag(e, "ASR_CANARY_CUDA")),
+        ("talkies",        lambda e: is_flag(e, "TALKIES")),
+        ("talkies-cuda",   lambda e: is_flag(e, "TALKIES_CUDA")),
         ("vllm-cuda",  lambda e: is_flag(e, "VLLM_CUDA")),
         ("sdcpp",          lambda e: is_flag(e, "SDCPP")),
         ("sdcpp-cuda",     lambda e: is_flag(e, "SDCPP_CUDA")),
