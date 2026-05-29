@@ -70,12 +70,8 @@ nginx :4000                                          ┌────────
                                   ├─ Cohere             (trial: 1K calls/MONTH — runs out fast, COHERE=1)
                                   ├─ Ollama CPU         (local, OLLAMA=1)
                                   ├─ Ollama CUDA        (local, NVIDIA, OLLAMA_CUDA=1)
-                                  ├─ Speaches CPU       (local, transcription + TTS, SPEACHES=1)
-                                  ├─ Speaches CUDA      (local, CUDA STT, SPEACHES_CUDA=1)
-                                  ├─ asr-canary CPU     (local, NeMo Canary STT, ASR_CANARY=1)
-                                  ├─ asr-canary CUDA    (local, NVIDIA, NeMo Canary STT, ASR_CANARY_CUDA=1)
-                                  ├─ vllm CUDA      (local, NVIDIA, vLLM audio-LLMs: Qwen3-ASR/Voxtral, VLLM_CUDA=1)
-                                  ├─ Qwen3 CUDA TTS     (local, CUDA voice-cloning, QWEN_TTS_CUDA=1)
+                                  ├─ Talkies CPU        (local, unified ASR + Kokoro TTS, TALKIES=1)
+                                  ├─ Talkies CUDA       (local, NVIDIA, full ASR + Kokoro + Qwen3-TTS voice cloning, TALKIES_CUDA=1)
                                   ├─ sd.cpp CPU         (local, image gen, SDCPP=1)
                                   ├─ sd.cpp CUDA        (local, image gen, SDCPP_CUDA=1)
                                   ├─ claudebox          (flat-rate, CLAUDEBOX=1)
@@ -107,10 +103,8 @@ Default writable locations:
 | `.data/hybrids3/`                            | hybrids3                     | Object storage data                                                                        |
 | `.data/nginx/`                               | nginx-auth-init              | Generated htpasswd (from `LITELLM_UI_BASIC_AUTH`)                                          |
 | `.data/ollama/`                              | ollama, ollama-cuda          | Downloaded model weights (shared — CPU and CUDA instances read the same blobs)             |
-| `.data/speaches/`                            | speaches, speaches-cuda      | Downloaded Whisper and Parakeet model weights (HuggingFace cache, shared between CPU/CUDA) |
-| `.data/asr-canary/`                          | asr-canary, asr-canary-cuda  | NeMo Canary model weights (HuggingFace cache, shared between CPU/CUDA — CPU pull fetches 180m-flash only, CUDA pull fetches all 3) |
-| `.data/vllm/`                            | vllm-cuda                | vLLM audio-LLM weights (HuggingFace cache for Qwen3-ASR-1.7B, Voxtral-Mini-3B) |
-| `.data/qwen3-tts/`                           | qwen3-cuda-tts               | Downloaded Qwen3-TTS model weights (HuggingFace cache)                                     |
+| `.data/talkies/`                             | talkies, talkies-cuda        | HuggingFace cache for all talkies models (Whisper × 3, Parakeet, Canary × 3, Kokoro). Shared between CPU and CUDA; CPU image loads a subset, CUDA loads the full set. |
+| `.data/talkies-voices/`                      | talkies-cuda                 | User-supplied Qwen3-TTS reference voices — drop `<name>.wav` (10-30s clean speech) and use as `voice=<name>` on `/v1/audio/speech` (nested paths supported) |
 | `.data/sdcpp/models/`                        | sdcpp, sdcpp-cuda            | Downloaded stable-diffusion model weights (shared between CPU and CUDA)                    |
 | `.data/librechat/`                           | librechat, librechat-mongodb | Conversation data (MongoDB), file uploads                                                  |
 | `.data/cloudflared/`                         | cloudflared                  | Tunnel config and credentials (if using named tunnel)                                      |
@@ -133,12 +127,8 @@ Default writable locations:
 | **[stealthy-auto-browse](https://github.com/psyb0t/docker-stealthy-auto-browse)** _(optional, `BROWSER=1`)_    | 5 Camoufox (hardened Firefox) replicas behind HAProxy. Real OS-level mouse and keyboard input via PyAutoGUI — no CDP exposure. Passes Cloudflare, CreepJS, BrowserScan, Pixelscan. Redis cookie sync across replicas. REST API and MCP server.                                                                                                                                |
 | **Ollama** _(optional, `OLLAMA=1`)_                                                                            | Local CPU inference. Runs llama3.2:3b, qwen3:4b, smollm2:1.7b, qwen2.5-coder:1.5b, qwen2.5-coder:3b, phi4-mini, gemma4:e2b, gemma3:4b (vision), nuextract-v1.5 (structured extraction), bge-m3, qwen3-embedding:0.6b (embeddings), dolphin-phi. Models are downloaded automatically on first start and cached in `.data/ollama/`. No GPU required.                            |
 | **Ollama CUDA** _(optional, `OLLAMA_CUDA=1`)_                                                                  | Local NVIDIA GPU inference. Runs all CPU models on GPU plus: qwen3:8b, qwen3:30b-a3b (MoE generalist), qwen2.5vl:7b (vision-language), gemma4:e4b, qwen2.5-coder:7b, deepseek-coder-v2:16b, llama3.1:8b, qwen3-abliterated:16b, gemma4-abliterated:e4b (uncensored vision), deepseek-r1:8b, deepseek-r1:14b (R1-Distill-Qwen-14B), phi4-reasoning:plus (math/reasoning specialist). Flash attention and KV cache enabled. Shares model storage with CPU ollama — no duplicate downloads. Requires `nvidia-container-toolkit`.         |
-| **Speaches** _(optional, `SPEACHES=1`)_                                                                        | Local CPU audio via [speaches-ai/speaches](https://github.com/speaches-ai/speaches). Transcription: `faster-distil-whisper-large-v3` (multilingual) and `parakeet-tdt-0.6b-v2` (English, ~3400× real-time on CPU). Text-to-speech: `Kokoro-82M` int8 (high-quality, English+Chinese-leaning) plus 17 curated Piper TTS models spanning 16 languages. Multi-speaker piper models (LibriTTS English-US with 904 speakers, VCTK English-UK with 109, MLS-FR/NL multi-speaker, Swedish NST) expose individual speakers via the OpenAI `voice` field; single-speaker models ignore `voice`. All lazy-downloaded on first request. Models cached in `.data/speaches/`.                                                     |
-| **Speaches CUDA** _(optional, `SPEACHES_CUDA=1`)_                                                              | CUDA-accelerated STT via speaches — Whisper-distil-large-v3 and Parakeet-TDT-0.6b. Uses the same model cache as CPU speaches. Shares `.data/speaches/` — no separate download. Requires `nvidia-container-toolkit`.                                                                                                                                                            |
-| **asr-canary CPU** _(optional, `ASR_CANARY=1`)_                                                                | NVIDIA NeMo Canary STT served by an in-repo FastAPI wrapper (`aigate/asr-canary/`). CPU build ships `canary-180m-flash` (175M, English). Weights pre-pulled by `asr-canary-pull` into `.data/asr-canary/`, served offline by the main container. Loaded models auto-unload after `ASR_CANARY_MODEL_TTL` (default 10 min). |
-| **asr-canary CUDA** _(optional, `ASR_CANARY_CUDA=1`)_                                                          | CUDA-accelerated NeMo Canary STT — all three sizes: `canary-180m-flash` (English), `canary-1b-flash` (EN/DE/FR/ES + EN↔X translation), `canary-qwen-2.5b` (hybrid SALM, English, emits punctuation + answers audio prompts). Shares `.data/asr-canary/` with the CPU variant. Requires `nvidia-container-toolkit`. |
-| **vllm CUDA** _(optional, `VLLM_CUDA=1`)_                                                              | CUDA-accelerated vLLM audio-LLM wrapper (`aigate/vllm/`). Supervises a single `vllm serve` subprocess; each of `qwen3-asr-1.7b`, `voxtral-mini-3b` is exposed under two LiteLLM aliases (`-transcribe` for `/v1/audio/transcriptions`, `-chat` for `/v1/chat/completions` with audio input parts). Only one model resident in VRAM — switching models restarts the subprocess. Weights pre-pulled by `vllm-cuda-pull` into `.data/vllm/`. Idle TTL kill (`VLLM_CUDA_MODEL_TTL`, default 10 min). Requires `nvidia-container-toolkit`. |
-| **Qwen3 CUDA TTS** _(optional, `QWEN_TTS_CUDA=1`)_                                                             | CUDA-accelerated TTS via [faster-qwen3-tts](https://github.com/andimarafioti/faster-qwen3-tts). Runs `Qwen3-TTS-12Hz-0.6B-Base` with CUDA graphs. Voice cloning via reference audio. Models cached in `.data/qwen3-tts/`. Requires `nvidia-container-toolkit`.                                                                                                                |
+| **[talkies](https://github.com/psyb0t/docker-talkies)** _(optional, `TALKIES=1`)_                              | Unified OpenAI-compatible speech service via `psyb0t/talkies:v0.3.0`. One container, both endpoints: `/v1/audio/transcriptions` and `/v1/audio/speech`. CPU image ships the three Whisper variants (`whisper-large-v3`, `whisper-large-v3-turbo`, `distil-whisper-large-v3`) plus `canary-180m-flash` for ASR, and `kokoro-82m` for TTS. Stereo channel-split diarization (`diarization=true`), VAD-chunked long audio, idle-unload TTL. Weights cached in `.data/talkies/`. |
+| **[talkies CUDA](https://github.com/psyb0t/docker-talkies)** _(optional, `TALKIES_CUDA=1`)_                    | CUDA-accelerated talkies (`psyb0t/talkies:v0.3.0-cuda`). Adds `parakeet-tdt-0.6b-v3`, `canary-1b-flash` (EN/DE/FR/ES + EN↔X translation), and `canary-qwen-2.5b` (hybrid SALM) on top of the CPU set. Kokoro TTS still runs on CPU even inside the CUDA image (fast enough that it doesn't need a GPU). Shares `.data/talkies/`. Requires `nvidia-container-toolkit`. |
 | **sd.cpp CPU** _(optional, `SDCPP=1`)_                                                                         | Local CPU image generation via [stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp). Go wrapper with OpenAI-compatible `/v1/images/generations` endpoint, model hot-swap, idle timeout auto-unload. Models: sd-turbo, sdxl-turbo. Models cached in `.data/sdcpp/models/`.                                                                                   |
 | **sd.cpp CUDA** _(optional, `SDCPP_CUDA=1`)_                                                                   | CUDA-accelerated image generation via stable-diffusion.cpp. Same wrapper as CPU with CUDA backend. Models: sd-turbo, sdxl-turbo, sdxl-lightning, flux-schnell, juggernaut-xi. Non-blocking — rejects concurrent requests with 503 instead of queuing (resource manager handles scheduling). Requires `nvidia-container-toolkit`.                                              |
 | **MCP tools** _(auto-enabled)_                                                                                 | Media generation and web search MCP server. Exposes `generate_image`, `generate_tts`, and `search_web` tools to any model with function calling. Discovers available models dynamically from LiteLLM. Returns structured JSON with persistent URLs (uploaded to HybridS3) — no base64 blobs. Auto-enabled when any image, TTS, or SearXNG provider is active.                 |
@@ -185,7 +175,7 @@ Models across multiple providers. Six offer free tiers with no credit card requi
 | 1st         | Free cloud       | Groq, Cerebras, OpenRouter, HuggingFace, Mistral, Cohere | Capped — see [free-tier reality check](docs/providers.md#free-tier-reality-check)         |
 | 2nd         | Flat-rate        | claudebox (Max sub), pibox-zai (z.ai)                    | Costs the subscription, no extra per-call                                                 |
 | 3rd         | Pay-per-token    | Anthropic, OpenAI                                        | Real money per token — last resort before going local                                     |
-| Last resort | Local (CPU/CUDA) | Ollama, Speaches, Qwen3 CUDA TTS, sd.cpp                 | No external limits — bounded only by your hardware                                        |
+| Last resort | Local (CPU/CUDA) | Ollama, talkies (ASR + Kokoro + Qwen3-TTS), sd.cpp       | No external limits — bounded only by your hardware                                        |
 
 ### Fallback chains
 
@@ -255,77 +245,29 @@ CUDA models run with flash attention and quantized KV cache. See [Resource manag
 | `local-ollama-cuda-bge-m3`                 | Text embeddings — long docs, multilingual (8192 ctx)             | ~570MB |
 | `local-ollama-cuda-qwen3-embed-0.6b`       | Text embeddings — modern, efficient                              | ~500MB |
 
-### Local transcription (asr-canary, CPU — `ASR_CANARY=1`)
+### Local transcription + TTS (talkies, CPU — `TALKIES=1`)
 
-| Model name                       | Description                                                          |
-| -------------------------------- | -------------------------------------------------------------------- |
-| `local-asr-canary-180m-flash`    | NeMo Canary 180M flash — English-only, very fast on CPU              |
+| Model name                                      | Description                                                                          |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `local-talkies-whisper-large-v3`                | faster-whisper large-v3 — multilingual, highest accuracy                             |
+| `local-talkies-whisper-large-v3-turbo`          | faster-whisper large-v3-turbo — multilingual, ~8× faster than large-v3               |
+| `local-talkies-canary-180m-flash`               | NeMo Canary 180M flash — English-only ASR                                            |
+| `local-talkies-kokoro-tts`                      | Kokoro 82M — TTS via `/v1/audio/speech`, ~41 voices across en/es/fr/hi/it/pt         |
 
-### Local transcription (asr-canary, CUDA — `ASR_CANARY_CUDA=1`)
+### Local transcription + TTS (talkies, CUDA — `TALKIES_CUDA=1`)
 
-| Model name                          | Description                                                            |
-| ----------------------------------- | ---------------------------------------------------------------------- |
-| `local-asr-canary-cuda-180m-flash`  | NeMo Canary 180M flash — English-only, ASR (CUDA)                      |
-| `local-asr-canary-cuda-1b-flash`    | NeMo Canary 1B flash — EN/DE/FR/ES, with EN↔X translation (CUDA)       |
-| `local-asr-canary-cuda-qwen-2.5b`   | NeMo Canary Qwen 2.5B — hybrid ASR+LLM (English, CUDA)                 |
+Adds the heavier ASR models that need a GPU to be useful. Kokoro TTS still runs on CPU even inside the CUDA image.
 
-### Local transcription + audio chat (vllm, CUDA — `VLLM_CUDA=1`)
-
-Each model exposes two aliases: `-transcribe` for `/v1/audio/transcriptions`, `-chat` for `/v1/chat/completions` with audio input parts. Single resident model — switching restarts the supervised `vllm serve` subprocess.
-
-| Model name                                                  | Description                                                            |
-| ----------------------------------------------------------- | ---------------------------------------------------------------------- |
-| `local-vllm-cuda-qwen3-asr-1.7b-transcribe`             | Qwen3-ASR 1.7B — multilingual ASR via vLLM (CUDA)                      |
-| `local-vllm-cuda-qwen3-asr-1.7b-chat`                   | Qwen3-ASR 1.7B — chat-completions with audio input parts (CUDA)        |
-| `local-vllm-cuda-voxtral-mini-3b-transcribe`            | Mistral Voxtral-Mini 3B — multilingual ASR (CUDA)                      |
-| `local-vllm-cuda-voxtral-mini-3b-chat`                  | Mistral Voxtral-Mini 3B — chat-completions with audio input (CUDA)     |
-
-### Local transcription (Speaches, CPU — `SPEACHES=1`)
-
-| Model name                                  | Description                                                                |
-| ------------------------------------------- | -------------------------------------------------------------------------- |
-| `local-speaches-whisper-distil-large-v3`    | Multilingual, distilled, high accuracy                                     |
-| `local-speaches-whisper-large-v3-turbo`     | Multilingual, ~8× faster than large-v3 at near-identical WER               |
-| `local-speaches-parakeet-tdt-0.6b`          | English-only, ~3400× real-time on GPU                                      |
-| `local-speaches-parakeet-tdt-0.6b-v3`       | 25 European languages — multilingual upgrade of v2                         |
-
-### Local text-to-speech (Speaches, CPU — `SPEACHES=1`)
-
-| Model name                              | Description                                                                          |
-| --------------------------------------- | ------------------------------------------------------------------------------------ |
-| `local-speaches-kokoro-tts`                       | Kokoro 82M int8 — high-quality, multiple voices via `voice` field (af_heart, af_alloy, af_bella, am_adam, am_michael, bf_emma, jf_alpha, zf_xiaobei, etc.).                                  |
-| `local-speaches-piper-en_US-libritts-high`        | Piper — English (US), **multi-speaker** (904 speakers from LibriTTS). Select speaker via `voice: "<id>"` where `<id>` is `"0"`..`"903"`. High quality. ONNX, CPU-realtime, lazy-downloaded. |
-| `local-speaches-piper-en_GB-vctk-medium`          | Piper — English (UK), **multi-speaker** (109 speakers from VCTK corpus). Select via `voice: "0"`..`"108"`.                                                                                  |
-| `local-speaches-piper-de_DE-thorsten-high`        | Piper — German, single speaker (Thorsten, male, high quality). `voice` ignored.                                                                                                             |
-| `local-speaches-piper-fr_FR-mls-medium`           | Piper — French, **multi-speaker** (MLS-FR). Select via `voice: "<id>"`.                                                                                                                     |
-| `local-speaches-piper-es_ES-davefx-medium`        | Piper — Spanish (Spain), single speaker (DaveFX, male).                                                                                                                                     |
-| `local-speaches-piper-it_IT-paola-medium`         | Piper — Italian, single speaker (Paola, female).                                                                                                                                            |
-| `local-speaches-piper-nl_NL-mls-medium`           | Piper — Dutch, **multi-speaker** (MLS-NL). Select via `voice: "<id>"`.                                                                                                                      |
-| `local-speaches-piper-pl_PL-darkman-medium`       | Piper — Polish, single speaker (Darkman, male).                                                                                                                                             |
-| `local-speaches-piper-pt_BR-faber-medium`         | Piper — Portuguese (Brazil), single speaker (Faber, male).                                                                                                                                  |
-| `local-speaches-piper-ro_RO-mihai-medium`         | Piper — Romanian, single speaker (Mihai, male).                                                                                                                                             |
-| `local-speaches-piper-ru_RU-irina-medium`         | Piper — Russian, single speaker (Irina, female).                                                                                                                                            |
-| `local-speaches-piper-sv_SE-nst-medium`           | Piper — Swedish, **multi-speaker** (NST corpus). Select via `voice: "<id>"`.                                                                                                                |
-| `local-speaches-piper-tr_TR-fahrettin-medium`     | Piper — Turkish, single speaker (Fahrettin, male).                                                                                                                                          |
-| `local-speaches-piper-uk_UA-ukrainian_tts-medium` | Piper — Ukrainian, single speaker (Ukrainian-TTS).                                                                                                                                          |
-| `local-speaches-piper-vi_VN-vais1000-medium`      | Piper — Vietnamese, single speaker (VAIS1000).                                                                                                                                              |
-| `local-speaches-piper-zh_CN-huayan-medium`        | Piper — Chinese (Mandarin), single speaker (Huayan, female).                                                                                                                                |
-| `local-speaches-piper-ar_JO-kareem-medium`        | Piper — Arabic (Jordan), single speaker (Kareem, male).                                                                                                                                     |
-
-### Local transcription (CUDA — `SPEACHES_CUDA=1`)
-
-| Model name                                    | Description                                                              |
-| --------------------------------------------- | ------------------------------------------------------------------------ |
-| `local-speaches-cuda-whisper-distil-large-v3` | CUDA-accelerated Whisper — same model as CPU, faster inference           |
-| `local-speaches-cuda-whisper-large-v3-turbo`  | CUDA, fastest Whisper at near-large WER (~8× faster than large-v3)       |
-| `local-speaches-cuda-parakeet-tdt-0.6b`       | CUDA-accelerated Parakeet TDT (English)                                  |
-| `local-speaches-cuda-parakeet-tdt-0.6b-v3`    | CUDA Parakeet TDT, 25 European languages                                 |
-
-### Local text-to-speech (CUDA — `QWEN_TTS_CUDA=1`)
-
-| Model name             | Description                                                                                   |
-| ---------------------- | --------------------------------------------------------------------------------------------- |
-| `local-qwen3-cuda-tts` | Qwen3-TTS 0.6B via faster-qwen3-tts — CUDA graphs, voice cloning (voices: alloy, echo, fable) |
+| Model name                                      | Description                                                                          |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `local-talkies-cuda-whisper-large-v3`           | faster-whisper large-v3 — multilingual (CUDA)                                        |
+| `local-talkies-cuda-whisper-large-v3-turbo`     | faster-whisper large-v3-turbo — multilingual (CUDA)                                  |
+| `local-talkies-cuda-parakeet-tdt-0.6b-v3`       | NeMo Parakeet TDT 0.6B v3 — 25 European languages                                    |
+| `local-talkies-cuda-canary-180m-flash`          | NeMo Canary 180M flash — English-only ASR (CUDA)                                     |
+| `local-talkies-cuda-canary-1b-flash`            | NeMo Canary 1B flash — EN/DE/FR/ES + EN↔X translation                                |
+| `local-talkies-cuda-canary-qwen-2.5b`           | NeMo Canary-Qwen 2.5B SALM — hybrid ASR+LLM (English)                                |
+| `local-talkies-cuda-kokoro-tts`                 | Kokoro 82M TTS (runs on CPU inside the CUDA image)                                   |
+| `local-talkies-cuda-qwen3-tts`                  | Qwen3-TTS 0.6B (CUDA-only) — voice cloning via reference `.wav` in `${DATA_DIR_TALKIES}/custom-voices/` (`voice=<name>`); samples `alloy`/`echo`/`fable` baked in; 17 languages |
 
 ### Local image generation (sd.cpp, CPU — `SDCPP=1`)
 
@@ -352,11 +294,11 @@ Models auto-download on first use and cache in `.data/sdcpp/models/`.
 
 Local services share limited hardware — a single GPU can't run an LLM, an image generator, and a TTS model simultaneously. The platform handles this automatically so you never have to think about it.
 
-**Automatic unloading** — every local service unloads idle models after a configurable timeout. Ollama unloads after 5 minutes by default. sd.cpp unloads after 5 minutes (`SDCPP_IDLE_TIMEOUT` / `SDCPP_CUDA_IDLE_TIMEOUT`). Speaches and Qwen3-TTS unload on demand. predictalot lazy-loads each forecaster on first call and unloads after `PREDICTALOT_MODEL_IDLE_TIMEOUT` (default `30m`) — only the models you've actually asked for occupy memory. This means VRAM and RAM are only held while a model is actively serving or within its idle window.
+**Automatic unloading** — every local service unloads idle models after a configurable timeout. Ollama unloads after 5 minutes by default. sd.cpp unloads after 5 minutes (`SDCPP_IDLE_TIMEOUT` / `SDCPP_CUDA_IDLE_TIMEOUT`). Talkies unloads ASR models after `TALKIES_MODEL_TTL` (default 10 min) and Qwen3-TTS unloads on demand. predictalot lazy-loads each forecaster on first call and unloads after `PREDICTALOT_MODEL_IDLE_TIMEOUT` (default `30m`) — only the models you've actually asked for occupy memory. This means VRAM and RAM are only held while a model is actively serving or within its idle window.
 
 **Hardware semaphores** — a LiteLLM callback (`resource_manager.py`) enforces mutual exclusion per hardware. An `asyncio.Semaphore(1)` ensures only one CUDA job runs at a time across all groups (LLM, image gen, TTS, STT). The same applies on CPU. If a CUDA image generation request arrives while a CUDA LLM model is loaded, the request waits for the semaphore, then the resource manager unloads the LLM before the image generation proceeds. This prevents GPU OOM without any manual intervention.
 
-**Competing-group unload** — before each local request, all other groups on the same hardware are told to free resources. For example, a `local-sdcpp-cuda-flux-schnell` request will unload ollama-cuda models, speaches-cuda STT models, and qwen3-cuda-tts before starting. Each service has its own unload mechanism: Ollama uses `keep_alive: 0`, sd.cpp uses `/sdcpp/v1/unload`, Speaches uses `DELETE /api/ps/{model}`, and Qwen3-TTS uses `/unload`.
+**Competing-group unload** — before each local request, all other groups on the same hardware are told to free resources. For example, a `local-sdcpp-cuda-flux-schnell` request will unload ollama-cuda models and every loaded talkies-cuda model before starting. Each service has its own unload mechanism: Ollama uses `keep_alive: 0`, sd.cpp uses `/sdcpp/v1/unload`, talkies uses `DELETE /api/ps/{model}` (covers all of its ASR + TTS slugs in one group).
 
 **Auto-load on demand** — models load automatically when needed. Send a request to any model and its service loads it on the fly. No pre-loading, no manual model management. The sd.cpp wrapper accepts `/v1/images/generations` requests even when no model is loaded — it starts the sd-server subprocess with the right model automatically.
 
@@ -397,9 +339,8 @@ Everything is opt-in via flags in `.env`. API keys are stored separately and nev
 | `GROQ=1`          | Groq models (free: 30 RPM, 1K-14.4K RPD per model — see [limits](docs/providers.md#free-tier-reality-check)) |
 | `OLLAMA=1`        | Local Ollama CPU inference (~6GB+ RAM)                                                    |
 | `OLLAMA_CUDA=1`   | Local Ollama NVIDIA GPU inference (requires `nvidia-container-toolkit`)                   |
-| `SPEACHES=1`      | Local Speaches CPU transcription/TTS (~4GB RAM)                                           |
-| `SPEACHES_CUDA=1` | Local CUDA-accelerated STT (requires `nvidia-container-toolkit`)                          |
-| `QWEN_TTS_CUDA=1` | Local CUDA-accelerated TTS via Qwen3 (voice cloning, requires `nvidia-container-toolkit`) |
+| `TALKIES=1`       | Local talkies CPU — unified ASR (whisper + canary-180m) + Kokoro TTS (~4GB RAM)           |
+| `TALKIES_CUDA=1`  | Local talkies CUDA — adds parakeet + canary-1b + canary-qwen-2.5b (requires `nvidia-container-toolkit`) |
 | `SDCPP=1`         | Local stable-diffusion.cpp CPU image generation                                           |
 | `SDCPP_CUDA=1`    | Local stable-diffusion.cpp CUDA image generation (requires `nvidia-container-toolkit`)    |
 | `HYBRIDS3=1`      | Object storage service + MCP server (S3-compatible, plain HTTP, auto-expiry)              |
@@ -425,9 +366,9 @@ make limits
 
 Reads your system's RAM, swap, and CPU core count and writes a `.env.limits` file with recommended `mem_limit`, `memswap_limit`, and `cpus` for every service. The Makefile picks this up automatically — no other steps needed.
 
-Allocations are **proportional to your enabled services** — enabling more services means each gets a smaller slice. The script reads your `.env` flags (`CUDA`, `SPEACHES`, `OLLAMA`, `BROWSER`, etc.) and only counts active services toward the RAM budget. Re-run it any time you enable or disable a service, move to a different server, or change your hardware.
+Allocations are **proportional to your enabled services** — enabling more services means each gets a smaller slice. The script reads your `.env` flags (`CUDA`, `TALKIES`, `OLLAMA`, `BROWSER`, etc.) and only counts active services toward the RAM budget. Re-run it any time you enable or disable a service, move to a different server, or change your hardware.
 
-CUDA services (`ollama-cuda`, `speaches-cuda`, `qwen3-cuda-tts`, `sdcpp-cuda`) are [resource-manager-aware](#resource-management) — only one has models loaded at a time, so the budget counts the largest plus small idle overhead for the others.
+CUDA services (`ollama-cuda`, `talkies-cuda`, `sdcpp-cuda`) are [resource-manager-aware](#resource-management) — only one has models loaded at a time, so the budget counts the largest plus small idle overhead for the others.
 
 Set `MAXUSE` to cap the entire stack to a percentage of your machine's resources — useful when you're sharing the server with other workloads:
 
@@ -483,37 +424,31 @@ curl http://localhost:4000/audio/transcriptions \
   -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
   -F "model=groq-whisper-large-v3" -F "file=@audio.mp3"
 
-# local transcription (Parakeet — English, insanely fast)
+# local transcription (talkies — parakeet, English, very fast on CUDA)
 curl http://localhost:4000/audio/transcriptions \
   -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
-  -F "model=local-speaches-parakeet-tdt-0.6b" -F "file=@audio.mp3"
+  -F "model=local-talkies-cuda-parakeet-tdt-0.6b-v3" -F "file=@audio.mp3"
 
-# text-to-speech (local CPU — Kokoro, many voices)
+# stereo speaker diarization (left/right channel split)
+curl http://localhost:4000/audio/transcriptions \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
+  -F "model=local-talkies-cuda-parakeet-tdt-0.6b-v3" \
+  -F "file=@call.wav" \
+  -F "diarization=true" \
+  -F "response_format=verbose_json"
+
+# text-to-speech (local CPU Kokoro via talkies — many voices)
 curl http://localhost:4000/audio/speech \
   -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"model": "local-speaches-kokoro-tts", "input": "Hello world", "voice": "af_heart"}' \
-  -o speech.mp3
-
-# text-to-speech (local CPU — Piper single-speaker; model IS the voice)
-curl http://localhost:4000/audio/speech \
-  -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"model": "local-speaches-piper-de_DE-thorsten-high", "input": "Hallo Welt"}' \
-  -o speech.mp3
-
-# text-to-speech (local CPU — Piper multi-speaker; voice = numeric speaker ID)
-curl http://localhost:4000/audio/speech \
-  -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"model": "local-speaches-piper-en_US-libritts-high", "voice": "42", "input": "Hello world"}' \
+  -d '{"model": "local-talkies-kokoro-tts", "input": "Hello world", "voice": "af_heart"}' \
   -o speech.mp3
 
 # text-to-speech (local CUDA — Qwen3-TTS, voice cloning)
 curl http://localhost:4000/audio/speech \
   -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"model": "local-qwen3-cuda-tts", "input": "Hello world", "voice": "alloy"}' \
+  -d '{"model": "local-talkies-cuda-qwen3-tts", "input": "Hello world", "voice": "alloy"}' \
   -o speech.mp3
 
 # text embeddings (local)

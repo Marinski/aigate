@@ -434,51 +434,35 @@ curl http://localhost:4000/audio/transcriptions \
   -F "file=@audio.mp3"
 ```
 
-Transcription models: `groq-whisper-large-v3-turbo`, `groq-whisper-large-v3`, `voxtral-small`, `openai-whisper`, `openai-gpt-4o-transcribe`, `openai-gpt-4o-mini-transcribe`, `local-speaches-whisper-distil-large-v3`, `local-speaches-whisper-large-v3-turbo`, `local-speaches-parakeet-tdt-0.6b`, `local-speaches-parakeet-tdt-0.6b-v3`, `local-speaches-cuda-whisper-distil-large-v3` (CUDA), `local-speaches-cuda-whisper-large-v3-turbo` (CUDA), `local-speaches-cuda-parakeet-tdt-0.6b` (CUDA), `local-speaches-cuda-parakeet-tdt-0.6b-v3` (CUDA), `local-asr-canary-180m-flash` (CPU NeMo Canary, English), `local-asr-canary-cuda-180m-flash` (CUDA, English), `local-asr-canary-cuda-1b-flash` (CUDA, EN/DE/FR/ES + EN↔X translation), `local-asr-canary-cuda-qwen-2.5b` (CUDA, English, hybrid SALM), `local-vllm-cuda-qwen3-asr-1.7b-transcribe` (CUDA, vLLM), `local-vllm-cuda-voxtral-mini-3b-transcribe` (CUDA, vLLM).
+Transcription models — talkies (CPU+CUDA), plus the hosted Groq/OpenAI offerings:
 
-### Audio-input chat (vLLM audio-LLMs)
+- **Cloud**: `groq-whisper-large-v3-turbo`, `groq-whisper-large-v3`, `voxtral-small`, `openai-whisper`, `openai-gpt-4o-transcribe`, `openai-gpt-4o-mini-transcribe`
+- **Local talkies CPU** (`TALKIES=1`): `local-talkies-whisper-large-v3`, `local-talkies-whisper-large-v3-turbo`, `local-talkies-canary-180m-flash`
+- **Local talkies CUDA** (`TALKIES_CUDA=1`): same as CPU plus `local-talkies-cuda-parakeet-tdt-0.6b-v3`, `local-talkies-cuda-canary-1b-flash` (EN/DE/FR/ES + EN↔X translation), `local-talkies-cuda-canary-qwen-2.5b` (hybrid SALM)
 
-The same vLLM audio models also expose `/chat/completions` with audio input parts under the `-chat` aliases:
-
-```bash
-curl http://localhost:4000/chat/completions \
-  -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "local-vllm-cuda-voxtral-mini-3b-chat",
-    "messages": [{
-      "role": "user",
-      "content": [
-        {"type": "text", "text": "summarize this audio in one sentence"},
-        {"type": "audio_url", "audio_url": {"url": "http://YOUR_HOST:4000/storage/uploads/clip.mp3"}}
-      ]
-    }]
-  }'
-```
-
-Audio-chat models: `local-vllm-cuda-qwen3-asr-1.7b-chat`, `local-vllm-cuda-voxtral-mini-3b-chat`. Each model accepts both `-transcribe` and `-chat` aliases — same underlying weights, only one resident in VRAM at a time (switching models restarts the vllm subprocess).
+talkies-specific knobs (any model): `response_format=text|json|verbose_json|srt|vtt`, `diarization=true` (stereo channel-split — left=L, right=R, segments tagged with `channel`).
 
 ---
 
 ## Text-to-Speech
 
 ```bash
-# CPU — Kokoro (multiple voices)
+# CPU — talkies Kokoro (multiple voices)
 curl http://localhost:4000/audio/speech \
   -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"model": "local-speaches-kokoro-tts", "input": "Hello world", "voice": "af_heart"}' \
+  -d '{"model": "local-talkies-kokoro-tts", "input": "Hello world", "voice": "af_heart"}' \
   -o speech.mp3
 
-# CUDA — Qwen3-TTS (voice cloning)
+# CUDA — Qwen3-TTS voice cloning (also inside talkies-cuda as of v0.4.0)
 curl http://localhost:4000/audio/speech \
   -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"model": "local-qwen3-cuda-tts", "input": "Hello world", "voice": "alloy"}' \
+  -d '{"model": "local-talkies-cuda-qwen3-tts", "input": "Hello world", "voice": "alloy"}' \
   -o speech.mp3
 ```
 
-TTS models: `local-speaches-kokoro-tts` (CPU, many voices), `local-qwen3-cuda-tts` (CUDA, voices: alloy/echo/fable), `openai-tts-1`, `openai-tts-1-hd`.
+TTS models: `local-talkies-kokoro-tts` (Kokoro 82M, CPU, ~41 voices across en/es/fr/hi/it/pt), `local-talkies-cuda-kokoro-tts` (same model, served inside the CUDA talkies container — Kokoro still runs on CPU there), `local-talkies-cuda-qwen3-tts` (Qwen3-TTS-0.6B voice cloning — drop reference `.wav` files into `${DATA_DIR_TALKIES}/custom-voices/` and use `voice=<filename-without-ext>`; samples `alloy`/`echo`/`fable` baked in), `openai-tts-1`, `openai-tts-1-hd`.
 
 ---
 

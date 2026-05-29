@@ -171,7 +171,7 @@ Image and TTS tools return structured JSON with all parameters used and a persis
 | Parameter | Type   | Description                                          | Default                                         |
 | --------- | ------ | ---------------------------------------------------- | ----------------------------------------------- |
 | `text`    | string | Text to convert to speech                            | _(required)_                                    |
-| `model`   | string | Which TTS model to use (listed in tool description)  | first available (prefers local-speaches-kokoro-tts) |
+| `model`   | string | Which TTS model to use (listed in tool description)  | first available (prefers local-talkies-cuda-kokoro-tts, then local-talkies-kokoro-tts) |
 | `voice`   | string | Voice to use                                         | `af_heart`                                      |
 | `speed`   | number | Speech speed multiplier                              | `1.0`                                           |
 

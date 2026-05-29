@@ -14,14 +14,6 @@
   model_info:
     mode: audio_transcription
 
-- model_name: local-talkies-distil-whisper-large-v3
-  litellm_params:
-    model: openai/distil-whisper-large-v3
-    api_base: http://talkies:8000/v1
-    api_key: none
-  model_info:
-    mode: audio_transcription
-
 - model_name: local-talkies-canary-180m-flash
   litellm_params:
     model: openai/canary-180m-flash
@@ -29,3 +21,13 @@
     api_key: none
   model_info:
     mode: audio_transcription
+
+# Kokoro TTS lives inside the same talkies container as of v0.3.0 —
+# `POST /v1/audio/speech` routed to the same upstream.
+- model_name: local-talkies-kokoro-tts
+  litellm_params:
+    model: openai/kokoro-82m
+    api_base: http://talkies:8000/v1
+    api_key: none
+  model_info:
+    mode: audio_speech

@@ -8,8 +8,8 @@
 #
 # Resource manager awareness: local services share model slots — only one has
 # models loaded at a time per hardware class.
-# CUDA group: ollama-cuda, speaches-cuda, qwen3-cuda-tts, sdcpp-cuda
-# CPU group: ollama, speaches, sdcpp
+# CUDA group: ollama-cuda, talkies-cuda, sdcpp-cuda
+# CPU  group: ollama, talkies, sdcpp
 # Peak concurrent RAM per group = max(active allocations) + (N-1) × idle overhead.
 #
 # System overhead: 2 GB or 5% of total RAM (whichever is larger) is reserved
@@ -35,7 +35,7 @@ total_cores=$(nproc)
 
 sab_replicas=5
 litellm_workers=4
-flag_speaches=0; flag_speaches_cuda=0; flag_qwen_tts_cuda=0
+flag_talkies=0; flag_talkies_cuda=0
 flag_ollama=0; flag_ollama_cuda=0; flag_browser=0
 flag_claudebox=0; flag_cbzai=0; flag_hybrids3=0; flag_cloudflared=0
 flag_librechat=0; flag_mcp=0; flag_sdcpp=0; flag_sdcpp_cuda=0
@@ -44,9 +44,8 @@ if [ -f .env ]; then
     _v() { grep -E "^$1=" .env | cut -d= -f2 | tr -d '[:space:]' || true; }
     val=$(_v STEALTHY_AUTO_BROWSE_NUM_REPLICAS); [ -n "$val" ] && sab_replicas=$val
     val=$(_v LITELLM_WORKERS); [ -n "$val" ] && litellm_workers=$val
-    [ "$(_v SPEACHES)" = "1" ]      && flag_speaches=1
-    [ "$(_v SPEACHES_CUDA)" = "1" ] && flag_speaches_cuda=1
-    [ "$(_v QWEN_TTS_CUDA)" = "1" ] && flag_qwen_tts_cuda=1
+    [ "$(_v TALKIES)" = "1" ]       && flag_talkies=1
+    [ "$(_v TALKIES_CUDA)" = "1" ]  && flag_talkies_cuda=1
     [ "$(_v OLLAMA)" = "1" ]        && flag_ollama=1
     [ "$(_v OLLAMA_CUDA)" = "1" ]   && flag_ollama_cuda=1
     [ "$(_v BROWSER)" = "1" ]       && flag_browser=1
@@ -54,13 +53,12 @@ if [ -f .env ]; then
     [ "$(_v PIBOX_ZAI)" = "1" ]     && flag_cbzai=1
     [ "$(_v HYBRIDS3)" = "1" ]      && flag_hybrids3=1
     [ "$(_v CLOUDFLARED)" = "1" ]   && flag_cloudflared=1
-    [ "$(_v LIBRECHAT)" = "1" ]    && flag_librechat=1
-    [ "$(_v SDCPP)" = "1" ]       && flag_sdcpp=1
-    [ "$(_v SDCPP_CUDA)" = "1" ]  && flag_sdcpp_cuda=1
-    # mcp auto-enabled when image/TTS providers active
+    [ "$(_v LIBRECHAT)" = "1" ]     && flag_librechat=1
+    [ "$(_v SDCPP)" = "1" ]         && flag_sdcpp=1
+    [ "$(_v SDCPP_CUDA)" = "1" ]    && flag_sdcpp_cuda=1
+    # mcp auto-enabled when image/STT/TTS providers active
     [ "$(_v HUGGINGFACE)" = "1" ] || [ "$(_v OPENAI)" = "1" ] || \
-        [ "$(_v SPEACHES)" = "1" ] || [ "$(_v SPEACHES_CUDA)" = "1" ] || \
-        [ "$(_v QWEN_TTS_CUDA)" = "1" ] || \
+        [ "$(_v TALKIES)" = "1" ] || [ "$(_v TALKIES_CUDA)" = "1" ] || \
         [ "$(_v SDCPP)" = "1" ] || [ "$(_v SDCPP_CUDA)" = "1" ] && flag_mcp=1
 fi
 
@@ -88,7 +86,7 @@ echo "  RAM:   ${total_ram_mb} MB  (effective: ${effective_ram_mb} MB — ${os_r
 echo "  Swap:  ${total_swap_mb} MB  (effective: ${effective_swap_mb} MB at ${maxuse}%)"
 echo "  Cores: ${total_cores}  (effective: ${effective_cores} at ${maxuse}%)"
 echo "  MAXUSE: ${maxuse}%"
-echo "  Enabled: ollama=${flag_ollama} ollama_cuda=${flag_ollama_cuda} speaches=${flag_speaches} speaches_cuda=${flag_speaches_cuda} qwen_tts_cuda=${flag_qwen_tts_cuda} sdcpp=${flag_sdcpp} sdcpp_cuda=${flag_sdcpp_cuda} browser=${flag_browser} claudebox=${flag_claudebox} cbzai=${flag_cbzai} hybrids3=${flag_hybrids3} cloudflared=${flag_cloudflared} librechat=${flag_librechat} mcp=${flag_mcp}"
+echo "  Enabled: ollama=${flag_ollama} ollama_cuda=${flag_ollama_cuda} talkies=${flag_talkies} talkies_cuda=${flag_talkies_cuda} sdcpp=${flag_sdcpp} sdcpp_cuda=${flag_sdcpp_cuda} browser=${flag_browser} claudebox=${flag_claudebox} cbzai=${flag_cbzai} hybrids3=${flag_hybrids3} cloudflared=${flag_cloudflared} librechat=${flag_librechat} mcp=${flag_mcp}"
 echo ""
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -150,7 +148,8 @@ hybrids3_raw=$(    raw_mem  2  128 )
 sab_redis_raw=$(   raw_mem  1   64 )
 sab_raw=$(         raw_mem  3  128 )
 sab_proxy_raw=$(   raw_mem  1   64 )
-speaches_raw=$(    raw_mem 15  512 )
+# talkies (CPU image) — whisper + canary-180m + Kokoro TTS, all CPU
+talkies_raw=$(     raw_mem 15  512 )
 ollama_raw=$(      raw_mem 24  512 )
 ollama_pull_raw=$( raw_mem  2  128 )
 cloudflared_raw=$( raw_mem  1   64 )
@@ -164,8 +163,7 @@ sdcpp_pull_raw=$(       raw_mem  1  128 )
 # CUDA — models live in VRAM; these cover process RAM, KV cache, audio buffers
 sdcpp_cuda_raw=$(       raw_mem 15  512 )
 ollama_cuda_raw=$(      raw_mem  6  256 )
-speaches_cuda_raw=$(    raw_mem  4  256 )
-qwen3_cuda_tts_raw=$(   raw_mem  4  512 )
+talkies_cuda_raw=$(     raw_mem  6  512 )
 
 # CPU allocations (not scaled — CPU is time-shared, not a hard budget)
 nginx_init_cpu=$(      cpu  2  2 )
@@ -179,7 +177,7 @@ postgres_cpu=$(        cpu  8  1 )
 sab_redis_cpu=$(       cpu  1  1 )
 sab_cpu=$(             cpu 10  2 )
 sab_proxy_cpu=$(       cpu  2  1 )
-speaches_cpu=$(        cpu 25  2 )
+talkies_cpu=$(         cpu 25  2 )
 ollama_cpu=$(          cpu 40  2 )
 ollama_pull_cpu=$(     cpu  5  1 )
 cloudflared_cpu=$(     cpu  1  1 )
@@ -191,44 +189,43 @@ sdcpp_cpu=$(           cpu 40  2 )
 sdcpp_pull_cpu=$(      cpu  2  1 )
 sdcpp_cuda_cpu=$(      cpu 40  2 )
 ollama_cuda_cpu=$(     cpu 30  2 )
-speaches_cuda_cpu=$(   cpu 20  2 )
-qwen3_cuda_tts_cpu=$(  cpu 20  2 )
+talkies_cuda_cpu=$(    cpu 25  2 )
 
 # ── Concurrent RAM estimate (resource-manager-aware) ─────────────────────────
 # Only count enabled services. CUDA group: resource manager ensures only one
-# service has models loaded — count max(three) + 2 × idle overhead (256 MB each).
+# service has models loaded at a time — count max(active) + (N-1) × idle.
 
 cuda_idle=256  # MB per idle CUDA container (models unloaded from VRAM)
+cpu_idle=128   # MB per idle CPU local container (models unloaded from RAM)
 
 concurrent=0
 concurrent=$(( concurrent + nginx_raw + postgres_raw + redis_raw + proxq_raw ))
 [ "$flag_claudebox" = "1" ]   && concurrent=$(( concurrent + claudebox_raw ))
 [ "$flag_cbzai" = "1" ]       && concurrent=$(( concurrent + cbzai_raw ))
 [ "$flag_hybrids3" = "1" ]    && concurrent=$(( concurrent + hybrids3_raw ))
+
 # CPU local group: resource manager ensures only one has models loaded at a time.
-# Count max(active CPU local services) + idle overhead for the rest.
-cpu_idle=128  # MB per idle CPU local container (models unloaded from RAM)
 cpu_local_count=0; cpu_local_max=0
-[ "$flag_speaches" = "1" ]  && cpu_local_count=$(( cpu_local_count + 1 )) && [ "$speaches_raw" -gt "$cpu_local_max" ]  && cpu_local_max=$speaches_raw
-[ "$flag_ollama" = "1" ]    && cpu_local_count=$(( cpu_local_count + 1 )) && [ "$ollama_raw" -gt "$cpu_local_max" ]    && cpu_local_max=$ollama_raw
-[ "$flag_sdcpp" = "1" ]     && cpu_local_count=$(( cpu_local_count + 1 )) && [ "$sdcpp_raw" -gt "$cpu_local_max" ]     && cpu_local_max=$sdcpp_raw
+[ "$flag_talkies" = "1" ]   && cpu_local_count=$(( cpu_local_count + 1 )) && [ "$talkies_raw" -gt "$cpu_local_max" ]    && cpu_local_max=$talkies_raw
+[ "$flag_ollama" = "1" ]    && cpu_local_count=$(( cpu_local_count + 1 )) && [ "$ollama_raw" -gt "$cpu_local_max" ]     && cpu_local_max=$ollama_raw
+[ "$flag_sdcpp" = "1" ]     && cpu_local_count=$(( cpu_local_count + 1 )) && [ "$sdcpp_raw" -gt "$cpu_local_max" ]      && cpu_local_max=$sdcpp_raw
 if [ "$cpu_local_count" -gt 0 ]; then
     cpu_local_idle_count=$(( cpu_local_count - 1 ))
     [ "$cpu_local_idle_count" -lt 0 ] && cpu_local_idle_count=0
     concurrent=$(( concurrent + cpu_local_max + cpu_local_idle_count * cpu_idle ))
 fi
+
 [ "$flag_cloudflared" = "1" ]  && concurrent=$(( concurrent + cloudflared_raw ))
 [ "$flag_mcp" = "1" ]          && concurrent=$(( concurrent + mcp_raw ))
 [ "$flag_librechat" = "1" ]    && concurrent=$(( concurrent + librechat_raw + librechat_mongo_raw ))
 if [ "$flag_browser" = "1" ]; then
     concurrent=$(( concurrent + sab_redis_raw + sab_raw * sab_replicas + sab_proxy_raw ))
 fi
+
 # CUDA group: resource manager ensures only one has models loaded at a time.
-# Count max(active CUDA services) + idle overhead for the rest.
 cuda_count=0; cuda_max=0
 [ "$flag_ollama_cuda" = "1" ]    && cuda_count=$(( cuda_count + 1 )) && [ "$ollama_cuda_raw" -gt "$cuda_max" ]    && cuda_max=$ollama_cuda_raw
-[ "$flag_speaches_cuda" = "1" ]  && cuda_count=$(( cuda_count + 1 )) && [ "$speaches_cuda_raw" -gt "$cuda_max" ]  && cuda_max=$speaches_cuda_raw
-[ "$flag_qwen_tts_cuda" = "1" ]  && cuda_count=$(( cuda_count + 1 )) && [ "$qwen3_cuda_tts_raw" -gt "$cuda_max" ] && cuda_max=$qwen3_cuda_tts_raw
+[ "$flag_talkies_cuda" = "1" ]   && cuda_count=$(( cuda_count + 1 )) && [ "$talkies_cuda_raw" -gt "$cuda_max" ]   && cuda_max=$talkies_cuda_raw
 [ "$flag_sdcpp_cuda" = "1" ]     && cuda_count=$(( cuda_count + 1 )) && [ "$sdcpp_cuda_raw" -gt "$cuda_max" ]     && cuda_max=$sdcpp_cuda_raw
 if [ "$cuda_count" -gt 0 ]; then
     cuda_idle_count=$(( cuda_count - 1 ))
@@ -258,21 +255,20 @@ hybrids3_mem=$(    scale_mem $hybrids3_raw     128 $scale ); hybrids3_swap=$(   
 sab_redis_mem=$(   scale_mem $sab_redis_raw     64 $scale ); sab_redis_swap=$(   _swap $sab_redis_mem )
 sab_mem=$(         scale_mem $sab_raw          128 $scale ); sab_swap=$(         _swap $sab_mem )
 sab_proxy_mem=$(   scale_mem $sab_proxy_raw     64 $scale ); sab_proxy_swap=$(   _swap $sab_proxy_mem )
-speaches_mem=$(    scale_mem $speaches_raw     512 $scale ); speaches_swap=$(    _swap $speaches_mem )
+talkies_mem=$(     scale_mem $talkies_raw      512 $scale ); talkies_swap=$(     _swap $talkies_mem )
 ollama_mem=$(      scale_mem $ollama_raw       512 $scale ); ollama_swap=$(      _swap $ollama_mem )
 ollama_pull_mem=$( scale_mem $ollama_pull_raw  128 $scale ); ollama_pull_swap=$( _swap $ollama_pull_mem )
 cloudflared_mem=$( scale_mem $cloudflared_raw   64 $scale ); cloudflared_swap=$( _swap $cloudflared_mem )
-proxq_mem=$(       scale_mem $proxq_raw       128 $scale ); proxq_swap=$(       _swap $proxq_mem )
-mcp_mem=$(         scale_mem $mcp_raw         128 $scale ); mcp_swap=$(         _swap $mcp_mem )
-librechat_mem=$(   scale_mem $librechat_raw   256 $scale ); librechat_swap=$(   _swap $librechat_mem )
+proxq_mem=$(       scale_mem $proxq_raw        128 $scale ); proxq_swap=$(       _swap $proxq_mem )
+mcp_mem=$(         scale_mem $mcp_raw          128 $scale ); mcp_swap=$(         _swap $mcp_mem )
+librechat_mem=$(   scale_mem $librechat_raw    256 $scale ); librechat_swap=$(   _swap $librechat_mem )
 librechat_mongo_mem=$( scale_mem $librechat_mongo_raw 256 $scale ); librechat_mongo_swap=$( _swap $librechat_mongo_mem )
 sdcpp_mem=$(            scale_mem $sdcpp_raw            512 $scale ); sdcpp_swap=$(            _swap $sdcpp_mem )
 sdcpp_pull_mem=$(       scale_mem $sdcpp_pull_raw       128 $scale ); sdcpp_pull_swap=$(       _swap $sdcpp_pull_mem )
 # CUDA: each gets its full scaled allocation (must handle being the active service)
 sdcpp_cuda_mem=$(       scale_mem $sdcpp_cuda_raw       512 $scale ); sdcpp_cuda_swap=$(       _swap $sdcpp_cuda_mem )
 ollama_cuda_mem=$(      scale_mem $ollama_cuda_raw      256 $scale ); ollama_cuda_swap=$(      _swap $ollama_cuda_mem )
-speaches_cuda_mem=$(    scale_mem $speaches_cuda_raw    256 $scale ); speaches_cuda_swap=$(    _swap $speaches_cuda_mem )
-qwen3_cuda_tts_mem=$(   scale_mem $qwen3_cuda_tts_raw   512 $scale ); qwen3_cuda_tts_swap=$(   _swap $qwen3_cuda_tts_mem )
+talkies_cuda_mem=$(     scale_mem $talkies_cuda_raw     512 $scale ); talkies_cuda_swap=$(     _swap $talkies_cuda_mem )
 
 # ── Print allocation table ────────────────────────────────────────────────────
 
@@ -295,11 +291,11 @@ if [ "$flag_browser" = "1" ]; then
     row "stealthy-auto-browse (×${sab_replicas})" $sab_mem $sab_swap $sab_cpu
     row "stealthy-auto-browse-proxy"    $sab_proxy_mem  $sab_proxy_swap  $sab_proxy_cpu
 fi
-if [ "$flag_speaches" = "1" ] || [ "$flag_ollama" = "1" ] || [ "$flag_sdcpp" = "1" ]; then
+if [ "$flag_talkies" = "1" ] || [ "$flag_ollama" = "1" ] || [ "$flag_sdcpp" = "1" ]; then
     echo ""
     echo "CPU local services (one model slot shared via resource manager):"
 fi
-[ "$flag_speaches" = "1" ]    && row "speaches"              $speaches_mem   $speaches_swap   $speaches_cpu
+[ "$flag_talkies" = "1" ]     && row "talkies"               $talkies_mem    $talkies_swap    $talkies_cpu
 [ "$flag_ollama" = "1" ]      && row "ollama"                $ollama_mem     $ollama_swap     $ollama_cpu
 if [ "$flag_ollama" = "1" ] || [ "$flag_ollama_cuda" = "1" ]; then
     row "ollama-pull (one-shot)" $ollama_pull_mem $ollama_pull_swap $ollama_pull_cpu
@@ -314,20 +310,19 @@ if [ "$flag_librechat" = "1" ]; then
     row "librechat"                     $librechat_mem       $librechat_swap       $librechat_cpu
     row "librechat-mongodb"             $librechat_mongo_mem $librechat_mongo_swap  $librechat_mongo_cpu
 fi
-if [ "$flag_ollama_cuda" = "1" ] || [ "$flag_speaches_cuda" = "1" ] || [ "$flag_qwen_tts_cuda" = "1" ] || [ "$flag_sdcpp_cuda" = "1" ]; then
+if [ "$flag_ollama_cuda" = "1" ] || [ "$flag_talkies_cuda" = "1" ] || [ "$flag_sdcpp_cuda" = "1" ]; then
     echo ""
     echo "CUDA services (one model slot shared via resource manager):"
     [ "$flag_sdcpp_cuda" = "1" ]     && row "sdcpp-cuda"      $sdcpp_cuda_mem     $sdcpp_cuda_swap     $sdcpp_cuda_cpu
     [ "$flag_ollama_cuda" = "1" ]    && row "ollama-cuda"     $ollama_cuda_mem    $ollama_cuda_swap    $ollama_cuda_cpu
-    [ "$flag_speaches_cuda" = "1" ]  && row "speaches-cuda"   $speaches_cuda_mem  $speaches_cuda_swap  $speaches_cuda_cpu
-    [ "$flag_qwen_tts_cuda" = "1" ]  && row "qwen3-cuda-tts"  $qwen3_cuda_tts_mem $qwen3_cuda_tts_swap $qwen3_cuda_tts_cpu
+    [ "$flag_talkies_cuda" = "1" ]   && row "talkies-cuda"    $talkies_cuda_mem   $talkies_cuda_swap   $talkies_cuda_cpu
 fi
 
 total_mem=$(( nginx_mem + postgres_mem + redis_mem + proxq_mem ))
 [ "$flag_claudebox" = "1" ]   && total_mem=$(( total_mem + claudebox_mem ))
 [ "$flag_cbzai" = "1" ]       && total_mem=$(( total_mem + cbzai_mem ))
 [ "$flag_hybrids3" = "1" ]    && total_mem=$(( total_mem + hybrids3_mem ))
-[ "$flag_speaches" = "1" ]    && total_mem=$(( total_mem + speaches_mem ))
+[ "$flag_talkies" = "1" ]     && total_mem=$(( total_mem + talkies_mem ))
 [ "$flag_ollama" = "1" ]      && total_mem=$(( total_mem + ollama_mem ))
 [ "$flag_sdcpp" = "1" ]          && total_mem=$(( total_mem + sdcpp_mem ))
 [ "$flag_cloudflared" = "1" ]    && total_mem=$(( total_mem + cloudflared_mem ))
@@ -335,8 +330,7 @@ total_mem=$(( nginx_mem + postgres_mem + redis_mem + proxq_mem ))
 [ "$flag_librechat" = "1" ]      && total_mem=$(( total_mem + librechat_mem + librechat_mongo_mem ))
 [ "$flag_browser" = "1" ]        && total_mem=$(( total_mem + sab_redis_mem + sab_mem * sab_replicas + sab_proxy_mem ))
 [ "$flag_ollama_cuda" = "1" ]    && total_mem=$(( total_mem + ollama_cuda_mem ))
-[ "$flag_speaches_cuda" = "1" ]  && total_mem=$(( total_mem + speaches_cuda_mem ))
-[ "$flag_qwen_tts_cuda" = "1" ]  && total_mem=$(( total_mem + qwen3_cuda_tts_mem ))
+[ "$flag_talkies_cuda" = "1" ]   && total_mem=$(( total_mem + talkies_cuda_mem ))
 
 echo ""
 echo "Total max RAM (all enabled persistent services): $(fmt $total_mem)"
@@ -347,7 +341,7 @@ echo "  ($(( total_mem * 100 / total_ram_mb ))% of total RAM, MAXUSE=${maxuse}%)
 cat > "$OUT" << ENVEOF
 # Auto-generated by: make limits
 # System: ${total_ram_mb}MB RAM, ${total_swap_mb}MB swap, ${total_cores} cores (MAXUSE=${maxuse}%)
-# Enabled: ollama=${flag_ollama} ollama_cuda=${flag_ollama_cuda} speaches=${flag_speaches} speaches_cuda=${flag_speaches_cuda} qwen_tts_cuda=${flag_qwen_tts_cuda} sdcpp=${flag_sdcpp} sdcpp_cuda=${flag_sdcpp_cuda} browser=${flag_browser} claudebox=${flag_claudebox} cbzai=${flag_cbzai} hybrids3=${flag_hybrids3} cloudflared=${flag_cloudflared} librechat=${flag_librechat} mcp=${flag_mcp}
+# Enabled: ollama=${flag_ollama} ollama_cuda=${flag_ollama_cuda} talkies=${flag_talkies} talkies_cuda=${flag_talkies_cuda} sdcpp=${flag_sdcpp} sdcpp_cuda=${flag_sdcpp_cuda} browser=${flag_browser} claudebox=${flag_claudebox} cbzai=${flag_cbzai} hybrids3=${flag_hybrids3} cloudflared=${flag_cloudflared} librechat=${flag_librechat} mcp=${flag_mcp}
 # Scale: ${scale}% — re-run make limits after enabling/disabling services
 # Regenerate: make limits  or  MAXUSE=80 make limits
 
@@ -393,9 +387,9 @@ SAB_PROXY_MEM_LIMIT=$(fmt $sab_proxy_mem)
 SAB_PROXY_MEMSWAP_LIMIT=$(fmt $sab_proxy_swap)
 SAB_PROXY_CPUS=${sab_proxy_cpu}
 
-SPEACHES_MEM_LIMIT=$(fmt $speaches_mem)
-SPEACHES_MEMSWAP_LIMIT=$(fmt $speaches_swap)
-SPEACHES_CPUS=${speaches_cpu}
+TALKIES_MEM_LIMIT=$(fmt $talkies_mem)
+TALKIES_MEMSWAP_LIMIT=$(fmt $talkies_swap)
+TALKIES_CPUS=${talkies_cpu}
 
 OLLAMA_MEM_LIMIT=$(fmt $ollama_mem)
 OLLAMA_MEMSWAP_LIMIT=$(fmt $ollama_swap)
@@ -441,13 +435,9 @@ OLLAMA_CUDA_MEM_LIMIT=$(fmt $ollama_cuda_mem)
 OLLAMA_CUDA_MEMSWAP_LIMIT=$(fmt $ollama_cuda_swap)
 OLLAMA_CUDA_CPUS=${ollama_cuda_cpu}
 
-SPEACHES_CUDA_MEM_LIMIT=$(fmt $speaches_cuda_mem)
-SPEACHES_CUDA_MEMSWAP_LIMIT=$(fmt $speaches_cuda_swap)
-SPEACHES_CUDA_CPUS=${speaches_cuda_cpu}
-
-QWEN3_CUDA_TTS_MEM_LIMIT=$(fmt $qwen3_cuda_tts_mem)
-QWEN3_CUDA_TTS_MEMSWAP_LIMIT=$(fmt $qwen3_cuda_tts_swap)
-QWEN3_CUDA_TTS_CPUS=${qwen3_cuda_tts_cpu}
+TALKIES_CUDA_MEM_LIMIT=$(fmt $talkies_cuda_mem)
+TALKIES_CUDA_MEMSWAP_LIMIT=$(fmt $talkies_cuda_swap)
+TALKIES_CUDA_CPUS=${talkies_cuda_cpu}
 ENVEOF
 
 echo ""

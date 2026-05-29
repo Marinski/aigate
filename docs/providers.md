@@ -225,65 +225,31 @@ Requires `nvidia-container-toolkit`. Flash attention + quantized KV cache enable
 | `local-ollama-cuda-bge-m3` | bge-m3 | embeddings, multilingual, 8192 ctx, ~570MB VRAM |
 | `local-ollama-cuda-qwen3-embed-0.6b` | qwen3-embedding:0.6b | embeddings, ~500MB VRAM |
 
-## Speaches CPU (local — `SPEACHES=1`)
+## talkies CPU (local — `TALKIES=1`)
 
-Transcription and TTS on CPU. Models auto-downloaded and cached in `.data/speaches/`. Loaded models auto-unload after 10 min idle (`SPEACHES_STT_MODEL_TTL` / `SPEACHES_TTS_MODEL_TTL`).
-
-| Alias | Model | Mode |
-| ----- | ----- | ---- |
-| `local-speaches-whisper-distil-large-v3` | Systran/faster-distil-whisper-large-v3 | transcription (multilingual, distilled, fast) |
-| `local-speaches-whisper-large-v3-turbo` | deepdml/faster-whisper-large-v3-turbo-ct2 | transcription (multilingual, ~8x faster than large-v3, low WER) |
-| `local-speaches-parakeet-tdt-0.6b` | istupakov/parakeet-tdt-0.6b-v2-onnx | transcription (English, ~3400× real-time on GPU) |
-| `local-speaches-parakeet-tdt-0.6b-v3` | istupakov/parakeet-tdt-0.6b-v3-onnx | transcription (25 European languages, multilingual upgrade of v2) |
-| `local-speaches-kokoro-tts` | speaches-ai/Kokoro-82M-v1.0-ONNX-int8 | TTS — voices: af_heart, af_alloy, am_echo, bm_fable, and many more |
-
-## Speaches CUDA (local NVIDIA — `SPEACHES_CUDA=1`)
-
-CUDA-accelerated STT. Shares model cache with CPU speaches (`.data/speaches/`) — no extra download. Loaded models auto-unload after 10 min idle (`SPEACHES_CUDA_STT_MODEL_TTL` / `SPEACHES_CUDA_TTS_MODEL_TTL`).
+Unified OpenAI-compatible speech service via [`psyb0t/talkies:v0.3.0`](https://github.com/psyb0t/docker-talkies). One container exposes both `/v1/audio/transcriptions` (whisper + canary-180m) and `/v1/audio/speech` (Kokoro-82M TTS). Stereo channel-split diarization (`diarization=true` → segments tagged with `"channel": "L"/"R"`), VAD-chunked long audio, idle-unload TTL. Weights auto-downloaded into `.data/talkies/` on first request. Loaded models auto-unload after `TALKIES_MODEL_TTL` (default `10m`).
 
 | Alias | Model | Mode |
 | ----- | ----- | ---- |
-| `local-speaches-cuda-whisper-distil-large-v3` | Systran/faster-distil-whisper-large-v3 | transcription (CUDA, float16) |
-| `local-speaches-cuda-whisper-large-v3-turbo` | deepdml/faster-whisper-large-v3-turbo-ct2 | transcription (CUDA, float16, fastest Whisper at near-large WER) |
-| `local-speaches-cuda-parakeet-tdt-0.6b` | istupakov/parakeet-tdt-0.6b-v2-onnx | transcription (CUDA, English, very fast) |
-| `local-speaches-cuda-parakeet-tdt-0.6b-v3` | istupakov/parakeet-tdt-0.6b-v3-onnx | transcription (CUDA, 25 European languages) |
+| `local-talkies-whisper-large-v3` | Systran/faster-whisper-large-v3 | transcription (multilingual, highest accuracy) |
+| `local-talkies-whisper-large-v3-turbo` | deepdml/faster-whisper-large-v3-turbo-ct2 | transcription (multilingual, ~8x faster than large-v3) |
+| `local-talkies-canary-180m-flash` | nvidia/canary-180m-flash | transcription (English, FastConformer encoder) |
+| `local-talkies-kokoro-tts` | hexgrad/Kokoro-82M | TTS — ~41 voices across en/es/fr/hi/it/pt (`af_heart`, `bm_george`, `ef_dora`, …; discover via `GET /v1/audio/voices`) |
 
-## asr-canary CPU (local — `ASR_CANARY=1`)
+## talkies CUDA (local NVIDIA — `TALKIES_CUDA=1`)
 
-NVIDIA NeMo Canary STT served by an in-repo Python/FastAPI wrapper (`aigate/asr-canary/`). OpenAI-compatible `/v1/audio/transcriptions` endpoint. CPU build ships **only** `canary-180m-flash` (175M params, English) — the 1B and Qwen-2.5B sizes are GPU-only. Weights downloaded once by `asr-canary-pull` into `.data/asr-canary/` then served offline. Loaded models auto-unload after `ASR_CANARY_MODEL_TTL` seconds (default 600).
-
-| Alias | Model | Mode |
-| ----- | ----- | ---- |
-| `local-asr-canary-180m-flash` | nvidia/canary-180m-flash | transcription (English, ~870x real-time on CPU, FastConformer encoder) |
-
-## asr-canary CUDA (local NVIDIA — `ASR_CANARY_CUDA=1`)
-
-CUDA-accelerated NeMo Canary, all three sizes. Weights pulled by `asr-canary-cuda-pull` into the shared `.data/asr-canary/` cache (same dir as the CPU variant — overlapping models are not re-downloaded). Loaded models auto-unload after `ASR_CANARY_CUDA_MODEL_TTL` seconds (default 600). The LiteLLM resource manager evicts these from VRAM whenever a competing CUDA job (LLM / image / TTS / other STT) arrives.
+CUDA-accelerated talkies (`psyb0t/talkies:v0.3.0-cuda`). Adds Parakeet TDT, Canary-1B-Flash, and Canary-Qwen-2.5B SALM on top of the CPU set. Kokoro TTS still runs on CPU inside the CUDA image (fast enough that it doesn't need a GPU). Shares `.data/talkies/` with the CPU variant. The LiteLLM resource manager evicts these from VRAM whenever a competing CUDA job (LLM / image / TTS / other STT) arrives.
 
 | Alias | Model | Mode |
 | ----- | ----- | ---- |
-| `local-asr-canary-cuda-180m-flash` | nvidia/canary-180m-flash | transcription (CUDA, English) |
-| `local-asr-canary-cuda-1b-flash` | nvidia/canary-1b-flash | transcription (CUDA, EN/DE/FR/ES, plus EN↔X translation) |
-| `local-asr-canary-cuda-qwen-2.5b` | nvidia/canary-qwen-2.5b | transcription (CUDA, English, NeMo SALM hybrid ASR+LLM — emits punctuation/casing + can answer prompts about the audio) |
-
-## vllm CUDA (local NVIDIA — `VLLM_CUDA=1`)
-
-vLLM-served audio-LLMs via an in-repo Python/FastAPI supervisor (`aigate/vllm/`). Each model is exposed under **two aliases**: a `-transcribe` alias on `/v1/audio/transcriptions` and a `-chat` alias on `/v1/chat/completions` that accepts `{type: input_audio}` content parts. The wrapper supervises a single `vllm serve` subprocess at a time — switching models means restarting it (the entire model has to fit in VRAM). The LiteLLM resource manager evicts the subprocess whenever a competing CUDA job arrives; idle subprocesses are killed after `VLLM_CUDA_MODEL_TTL` seconds (default 600). Cold-start is slow (`vllm serve` boot + weight load is typically 30–90s).
-
-| Alias | Model | Mode |
-| ----- | ----- | ---- |
-| `local-vllm-cuda-qwen3-asr-1.7b-transcribe` | Qwen/Qwen3-ASR-1.7B | transcription (CUDA, multilingual ASR, ~8GB VRAM) |
-| `local-vllm-cuda-qwen3-asr-1.7b-chat` | Qwen/Qwen3-ASR-1.7B | chat with audio input parts |
-| `local-vllm-cuda-voxtral-mini-3b-transcribe` | mistralai/Voxtral-Mini-3B-2507 | transcription (CUDA, multilingual, ~9.5GB VRAM) |
-| `local-vllm-cuda-voxtral-mini-3b-chat` | mistralai/Voxtral-Mini-3B-2507 | chat with audio input parts — full Mistral-native multimodal LLM (summarize/translate/answer questions about audio) |
-
-## Qwen3 CUDA TTS (local NVIDIA — `QWEN_TTS_CUDA=1`)
-
-CUDA-accelerated TTS with voice cloning via [faster-qwen3-tts](https://github.com/andimarafioti/faster-qwen3-tts). Model cached in `.data/qwen3-tts/`.
-
-| Alias | Model | Mode |
-| ----- | ----- | ---- |
-| `local-qwen3-cuda-tts` | Qwen/Qwen3-TTS-12Hz-0.6B-Base | TTS — voices: alloy, echo, fable |
+| `local-talkies-cuda-whisper-large-v3` | Systran/faster-whisper-large-v3 | transcription (CUDA, multilingual) |
+| `local-talkies-cuda-whisper-large-v3-turbo` | deepdml/faster-whisper-large-v3-turbo-ct2 | transcription (CUDA, fastest Whisper at near-large WER) |
+| `local-talkies-cuda-parakeet-tdt-0.6b-v3` | nvidia/parakeet-tdt-0.6b-v3 | transcription (CUDA, 25 European languages) |
+| `local-talkies-cuda-canary-180m-flash` | nvidia/canary-180m-flash | transcription (CUDA, English) |
+| `local-talkies-cuda-canary-1b-flash` | nvidia/canary-1b-flash | transcription (CUDA, EN/DE/FR/ES + EN↔X translation) |
+| `local-talkies-cuda-canary-qwen-2.5b` | nvidia/canary-qwen-2.5b | transcription (CUDA, English, NeMo SALM hybrid ASR+LLM) |
+| `local-talkies-cuda-kokoro-tts` | hexgrad/Kokoro-82M | TTS (runs on CPU inside the CUDA image) |
+| `local-talkies-cuda-qwen3-tts` | Qwen/Qwen3-TTS-12Hz-0.6B-Base | TTS — voice cloning via reference `.wav` files in `${DATA_DIR_TALKIES}/custom-voices/`; samples `alloy`/`echo`/`fable` baked in; supports 17 languages (en, zh, ja, ko, fr, de, es, it, pt, ru, vi, th, id, ar, tr, pl, nl) |
 
 ## sd.cpp CPU (local — `SDCPP=1`)
 

@@ -53,8 +53,9 @@ IMAGE_DEFAULT_ORDER = [
     "openai-dall-e-3",
 ]
 TTS_DEFAULT_ORDER = [
-    "local-speaches-kokoro-tts",
-    "local-qwen3-cuda-tts",
+    "local-talkies-cuda-kokoro-tts",
+    "local-talkies-kokoro-tts",
+    "local-talkies-cuda-qwen3-tts",
     "openai-tts-1",
 ]
 

@@ -2,6 +2,47 @@
 
 All notable changes to this project are documented here.
 
+## [v3.0.0] — 2026-05-29
+
+**Breaking: removed in-repo `talkies/`, `asr-canary/`, `vllm/`, and `qwen3-cuda-tts/` source trees. All transcription + TTS now goes through the external [`psyb0t/talkies`](https://github.com/psyb0t/docker-talkies) image (pinned to `v0.5.0` / `v0.5.0-cuda`). One container exposes both `POST /v1/audio/transcriptions` (whisper + canary + parakeet) and `POST /v1/audio/speech` (Kokoro-82M; Qwen3-TTS-0.6B voice cloning on CUDA).**
+
+### Env-var migration
+
+| Old | New |
+|---|---|
+| `SPEACHES` / `SPEACHES_CUDA` | `TALKIES` / `TALKIES_CUDA` |
+| `ASR_CANARY` / `ASR_CANARY_CUDA` | `TALKIES` / `TALKIES_CUDA` |
+| `VLLM_CUDA` | removed (no replacement — run vllm-the-library separately if you need audio-input chat) |
+| `QWEN_TTS_CUDA` | folded into `TALKIES_CUDA` (Qwen3-TTS bundles into the talkies-cuda image) |
+
+### LiteLLM alias migration
+
+| Old | New |
+|---|---|
+| `local-speaches-*` / `local-speaches-cuda-*` | `local-talkies-*` / `local-talkies-cuda-*` |
+| `local-asr-canary-*` / `local-asr-canary-cuda-*` | `local-talkies-*` / `local-talkies-cuda-*` |
+| `local-vllm-cuda-*` | removed |
+| `local-qwen3-cuda-tts` | `local-talkies-cuda-qwen3-tts` |
+| `local-speaches-kokoro-tts` | `local-talkies-kokoro-tts` (+ `-cuda-` variant) |
+
+`distil-whisper-large-v3` is dropped from the talkies model set as English-only redundancy — use `whisper-large-v3-turbo` instead (multilingual, similar speed).
+
+### Data-dir migration
+
+`.data/speaches/`, `.data/asr-canary/`, `.data/vllm/`, `.data/qwen3-tts/` → `.data/talkies/` (single bind mount → `/data` inside the container; `hf/hub/models--*/` for the HF cache, `custom-voices/<name>.wav` for Qwen3-TTS reference voices).
+
+### Voice cloning (CUDA only)
+
+Drop a `<name>.wav` (10-30s clean speech) into `${DATA_DIR_TALKIES}/custom-voices/` on the host and use `voice=<name>` on `/v1/audio/speech`. Three sample voices (`alloy`, `echo`, `fable`) baked into the image. Nested paths supported (`voice=clients/acme/jane` → `${DATA_DIR_TALKIES}/custom-voices/clients/acme/jane.wav`). 17 languages: en, zh, ja, ko, fr, de, es, it, pt, ru, vi, th, id, ar, tr, pl, nl.
+
+### Other in-repo cleanup
+
+- `litellm/callbacks/resource_manager.py` — group set trimmed to `cuda-llm`, `cuda-img`, `cuda-stt-talkies`, `cpu-llm`, `cpu-img`, `cpu-stt-talkies`. Unload functions for speaches / asr-canary / vllm / qwen3-cuda-tts removed; per-group unloads parallelized via `asyncio.gather`. Talkies upstream model list covers all 12 v0.5.0 slugs (whisper × 2, parakeet, canary × 3, Kokoro, Qwen3-TTS).
+- `recommend-limits.sh` — flag + allocation set rewritten to match the new service inventory.
+- nginx inference-path timeouts (`TIMEOUT_API` / `TIMEOUT_CLAUDEBOX` / `TIMEOUT_LIBRECHAT` / `TIMEOUT_PREDICTALOT`) bumped to `24h` default — long CPU transcriptions and long-context completions no longer killed by a 600s read timeout. Non-inference paths (admin, telethon, searxng, mailbox, proxq, browser) kept their original short timeouts.
+- `litellm.request_timeout` bumped to `86400` in `base.yaml`, with per-request injection via `resource_manager.async_pre_call_hook` so LiteLLM's hardcoded 600s default no longer fires.
+- `.gitignore` rewritten to cover Python bytecode (`__pycache__/`, `*.pyc`), virtualenvs, IDE config, OS junk, and root-level scratch artifacts (probe scripts, downloaded test fixtures). `.data/talkies/` + `.data/talkies/custom-voices/` added to the data-dir allowlist; `.data/speaches/` removed.
+
 ## [v2.9.0] — 2026-05-26
 
 **`asr-canary` now returns OpenAI Whisper-shape `verbose_json` with segment + word timestamps for the multitask Canary models, plus `srt` / `vtt` subtitle formats.**

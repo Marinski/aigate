@@ -11,26 +11,25 @@ Enforces two things:
 Groups (CUDA):
   cuda-llm          : local-ollama-cuda-* models
   cuda-img          : local-sdcpp-cuda-* (sd.cpp image generation)
-  cuda-tts          : local-qwen3-cuda-tts
-  cuda-stt-speaches : local-speaches-cuda-*
-  cuda-stt-canary   : local-asr-canary-cuda-*
-  cuda-stt-talkies  : local-talkies-cuda-*
-  cuda-vllm     : local-vllm-cuda-*  (audio-LLMs: Qwen3-ASR / Voxtral / Granite-Speech)
+  cuda-stt-talkies  : local-talkies-cuda-*  (ASR + Kokoro TTS + Qwen3-TTS)
 
 Groups (CPU):
   cpu-llm           : local-ollama-cpu-* models   (unload frees RAM)
   cpu-img           : local-sdcpp-cpu-* (sd.cpp image generation)
-  cpu-tts           : local-speaches-kokoro-tts
-  cpu-stt-speaches  : local-speaches-whisper-*, local-speaches-parakeet-*
-  cpu-stt-canary    : local-asr-canary-*
   cpu-stt-talkies   : local-talkies-*
 
-The three CUDA STT services are split into separate groups so they evict each
-other (all compete for the same VRAM). Within each service, the wrapper
-handles its own intra-service eviction (only one model resident at a time).
+Each group is unloaded before a request lands on a competing group (so
+qwen3-tts frees VRAM before talkies-cuda needs it, etc.). Within a service,
+the wrapper handles its own intra-service eviction (only one model resident
+at a time).
 
-Speaches unloading uses DELETE /api/ps/{model_id} which evicts the model
-from memory but keeps it on disk — next request auto-reloads it.
+Kokoro (CPU + CUDA TTS) is intentionally NOT in any group — Kokoro-FastAPI
+has no unload endpoint and the model is tiny (~80MB VRAM), so it coexists
+without needing cross-service eviction.
+
+Unloading uses DELETE /api/ps/{model_id} where supported (talkies), which
+evicts the model from memory but keeps weights on disk — next request
+auto-reloads.
 """
 
 import asyncio
@@ -53,53 +52,19 @@ _CPU_LLM_PREFIX = "local-ollama-cpu-"
 _CUDA_IMG_PREFIX = "local-sdcpp-cuda-"
 _CPU_IMG_PREFIX = "local-sdcpp-cpu-"
 
-_CUDA_TTS = {"local-qwen3-cuda-tts"}
-_CUDA_STT_SPEACHES = {
-    "local-speaches-cuda-whisper-distil-large-v3",
-    "local-speaches-cuda-whisper-large-v3-turbo",
-    "local-speaches-cuda-parakeet-tdt-0.6b",
-    "local-speaches-cuda-parakeet-tdt-0.6b-v3",
-}
-_CUDA_STT_CANARY = {
-    "local-asr-canary-cuda-180m-flash",
-    "local-asr-canary-cuda-1b-flash",
-    "local-asr-canary-cuda-qwen-2.5b",
-}
-# vllm exposes each model under two aliases (-transcribe + -chat) — both
-# map onto the same supervised vllm-serve subprocess, so they share one group.
-_VLLM_CUDA_PREFIX = "local-vllm-cuda-"
-
 # talkies — unified ASR (whisper + parakeet + canary). Both CPU and CUDA
 # variants share `local-talkies-` prefix; CUDA adds `cuda-` infix.
 _TALKIES_CUDA_PREFIX = "local-talkies-cuda-"
 _TALKIES_CPU_PREFIX = "local-talkies-"
 
-_CPU_TTS = {"local-speaches-kokoro-tts"}
-_CPU_STT_SPEACHES = {
-    "local-speaches-whisper-distil-large-v3",
-    "local-speaches-whisper-large-v3-turbo",
-    "local-speaches-parakeet-tdt-0.6b",
-    "local-speaches-parakeet-tdt-0.6b-v3",
-}
-_CPU_STT_CANARY = {
-    "local-asr-canary-180m-flash",
-}
-
 _ALL_CUDA_GROUPS = {
     "cuda-llm",
     "cuda-img",
-    "cuda-tts",
-    "cuda-stt-speaches",
-    "cuda-stt-canary",
     "cuda-stt-talkies",
-    "cuda-vllm",
 }
 _ALL_CPU_GROUPS = {
     "cpu-llm",
     "cpu-img",
-    "cpu-tts",
-    "cpu-stt-speaches",
-    "cpu-stt-canary",
     "cpu-stt-talkies",
 }
 
@@ -113,25 +78,11 @@ def _get_group(model: str) -> Optional[str]:
         return "cuda-img"
     if model.startswith(_CPU_IMG_PREFIX):
         return "cpu-img"
-    if model in _CUDA_TTS:
-        return "cuda-tts"
-    if model in _CUDA_STT_SPEACHES:
-        return "cuda-stt-speaches"
-    if model in _CUDA_STT_CANARY:
-        return "cuda-stt-canary"
-    if model.startswith(_VLLM_CUDA_PREFIX):
-        return "cuda-vllm"
     # talkies CUDA must be checked before CPU (longer prefix wins)
     if model.startswith(_TALKIES_CUDA_PREFIX):
         return "cuda-stt-talkies"
     if model.startswith(_TALKIES_CPU_PREFIX):
         return "cpu-stt-talkies"
-    if model in _CPU_TTS:
-        return "cpu-tts"
-    if model in _CPU_STT_SPEACHES:
-        return "cpu-stt-speaches"
-    if model in _CPU_STT_CANARY:
-        return "cpu-stt-canary"
     return None
 
 
@@ -210,87 +161,33 @@ async def _unload_cpu_img():
             logger.warning("[resource_manager] cpu-img unload error: %s", e)
 
 
-async def _unload_cuda_tts():
-    """Tell qwen3-cuda-tts to release VRAM."""
-    logger.warning("[resource_manager] unloading cuda-tts (qwen3-cuda-tts)")
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        try:
-            r = await client.post("http://qwen3-cuda-tts:8000/unload")
-            logger.warning(
-                "[resource_manager] cuda-tts unloaded, status=%s", r.status_code
-            )
-        except Exception as e:
-            logger.warning("[resource_manager] cuda-tts unload error: %s", e)
-
-
-_SPEACHES_CUDA_URL = "http://speaches-cuda:8000"
-_SPEACHES_CPU_URL = "http://speaches:8000"
-
-# HuggingFace model IDs loaded by each speaches instance
-_SPEACHES_CUDA_STT_MODELS = [
-    "Systran/faster-distil-whisper-large-v3",
-    "deepdml/faster-whisper-large-v3-turbo-ct2",
-    "istupakov/parakeet-tdt-0.6b-v2-onnx",
-    "istupakov/parakeet-tdt-0.6b-v3-onnx",
-]
-_SPEACHES_CPU_TTS_MODELS = [
-    "speaches-ai/Kokoro-82M-v1.0-ONNX-int8",
-]
-_SPEACHES_CPU_STT_MODELS = [
-    "Systran/faster-distil-whisper-large-v3",
-    "deepdml/faster-whisper-large-v3-turbo-ct2",
-    "istupakov/parakeet-tdt-0.6b-v2-onnx",
-    "istupakov/parakeet-tdt-0.6b-v3-onnx",
-]
-
-# asr-canary uses local slugs (the model_id in its registry), not HF repo IDs
-_ASR_CANARY_CUDA_URL = "http://asr-canary-cuda:8000"
-_ASR_CANARY_CPU_URL = "http://asr-canary:8000"
-_ASR_CANARY_CUDA_STT_MODELS = [
-    "canary-180m-flash",
-    "canary-1b-flash",
-    "canary-qwen-2.5b",
-]
-_ASR_CANARY_CPU_STT_MODELS = [
-    "canary-180m-flash",
-]
-
-# vllm — single supervised vllm-serve subprocess; DELETE /api/ps/{model_id}
-# kills it and frees VRAM. We send DELETE for every registered model_id; only
-# the one currently loaded returns 200, the rest return 404 (no-op).
-_VLLM_CUDA_URL = "http://vllm-cuda:8000"
-_VLLM_CUDA_MODELS = [
-    "qwen3-asr-1.7b",
-    "voxtral-mini-3b",
-]
-
-# talkies — unified ASR; DELETE /api/ps/{model_id} per model. CUDA has the
-# full set, CPU a subset (whisper variants + canary-180m-flash only).
+# talkies — unified ASR + TTS; DELETE /api/ps/{model_id} per model. CUDA has
+# the full set (whisper × 2, parakeet, canary × 3, Kokoro, Qwen3-TTS), CPU
+# a subset (whisper variants + canary-180m-flash + Kokoro).
 _TALKIES_CUDA_URL = "http://talkies-cuda:8000"
 _TALKIES_CPU_URL = "http://talkies:8000"
 _TALKIES_CUDA_MODELS = [
     "whisper-large-v3",
     "whisper-large-v3-turbo",
-    "distil-whisper-large-v3",
     "parakeet-tdt-0.6b-v3",
     "canary-180m-flash",
     "canary-1b-flash",
     "canary-qwen-2.5b",
+    "kokoro-82m",
+    "qwen3-tts-0.6b",
 ]
 _TALKIES_CPU_MODELS = [
     "whisper-large-v3",
     "whisper-large-v3-turbo",
-    "distil-whisper-large-v3",
     "canary-180m-flash",
+    "kokoro-82m",
 ]
 
 
-async def _unload_speaches_models(base_url: str, group: str, model_ids: list) -> None:
-    """Unload models from a speaches-style instance in parallel via DELETE
-    /api/ps/{model_id}. Sequential calls compounded the pre-transcribe
-    latency badly (one slow service blocked every subsequent unload); fan
-    them out so the whole group's eviction is bounded by the slowest single
-    response, not the sum.
+async def _unload_via_api_ps(base_url: str, group: str, model_ids: list) -> None:
+    """Unload models from a service exposing DELETE /api/ps/{model_id}
+    (talkies). Parallel — one slow upstream shouldn't block the other
+    unloads.
     """
     async with httpx.AsyncClient(timeout=10.0) as client:
         async def _one(model_id: str) -> None:
@@ -322,34 +219,10 @@ async def _unload_speaches_models(base_url: str, group: str, model_ids: list) ->
         await asyncio.gather(*(_one(mid) for mid in model_ids), return_exceptions=True)
 
 
-async def _unload_cuda_stt_speaches():
-    """Unload CUDA STT models from speaches-cuda to free VRAM."""
-    logger.warning("[resource_manager] unloading cuda-stt-speaches models")
-    await _unload_speaches_models(
-        _SPEACHES_CUDA_URL, "cuda-stt-speaches", _SPEACHES_CUDA_STT_MODELS
-    )
-
-
-async def _unload_cuda_stt_canary():
-    """Unload CUDA STT models from asr-canary-cuda to free VRAM."""
-    logger.warning("[resource_manager] unloading cuda-stt-canary models")
-    await _unload_speaches_models(
-        _ASR_CANARY_CUDA_URL, "cuda-stt-canary", _ASR_CANARY_CUDA_STT_MODELS
-    )
-
-
-async def _unload_vllm_cuda():
-    """Kill the supervised vllm-serve subprocess (frees the entire model VRAM)."""
-    logger.warning("[resource_manager] unloading cuda-vllm subprocess")
-    await _unload_speaches_models(
-        _VLLM_CUDA_URL, "cuda-vllm", _VLLM_CUDA_MODELS
-    )
-
-
 async def _unload_cuda_stt_talkies():
     """Unload CUDA STT models from talkies-cuda to free VRAM."""
     logger.warning("[resource_manager] unloading cuda-stt-talkies models")
-    await _unload_speaches_models(
+    await _unload_via_api_ps(
         _TALKIES_CUDA_URL, "cuda-stt-talkies", _TALKIES_CUDA_MODELS
     )
 
@@ -357,48 +230,17 @@ async def _unload_cuda_stt_talkies():
 async def _unload_cpu_stt_talkies():
     """Unload CPU STT models from talkies to free RAM."""
     logger.warning("[resource_manager] unloading cpu-stt-talkies models")
-    await _unload_speaches_models(
+    await _unload_via_api_ps(
         _TALKIES_CPU_URL, "cpu-stt-talkies", _TALKIES_CPU_MODELS
-    )
-
-
-async def _unload_cpu_tts():
-    """Unload CPU TTS models from speaches to free RAM."""
-    logger.warning("[resource_manager] unloading cpu-tts models")
-    await _unload_speaches_models(
-        _SPEACHES_CPU_URL, "cpu-tts", _SPEACHES_CPU_TTS_MODELS
-    )
-
-
-async def _unload_cpu_stt_speaches():
-    """Unload CPU STT models from speaches to free RAM."""
-    logger.warning("[resource_manager] unloading cpu-stt-speaches models")
-    await _unload_speaches_models(
-        _SPEACHES_CPU_URL, "cpu-stt-speaches", _SPEACHES_CPU_STT_MODELS
-    )
-
-
-async def _unload_cpu_stt_canary():
-    """Unload CPU STT models from asr-canary to free RAM."""
-    logger.warning("[resource_manager] unloading cpu-stt-canary models")
-    await _unload_speaches_models(
-        _ASR_CANARY_CPU_URL, "cpu-stt-canary", _ASR_CANARY_CPU_STT_MODELS
     )
 
 
 _UNLOAD_FNS = {
     "cuda-llm": _unload_cuda_llm,
     "cuda-img": _unload_cuda_img,
-    "cuda-tts": _unload_cuda_tts,
-    "cuda-stt-speaches": _unload_cuda_stt_speaches,
-    "cuda-stt-canary": _unload_cuda_stt_canary,
     "cuda-stt-talkies": _unload_cuda_stt_talkies,
-    "cuda-vllm": _unload_vllm_cuda,
     "cpu-llm": _unload_cpu_llm,
     "cpu-img": _unload_cpu_img,
-    "cpu-tts": _unload_cpu_tts,
-    "cpu-stt-speaches": _unload_cpu_stt_speaches,
-    "cpu-stt-canary": _unload_cpu_stt_canary,
     "cpu-stt-talkies": _unload_cpu_stt_talkies,
 }
 
@@ -542,18 +384,17 @@ class ResourceManager(CustomLogger):
 # By default LiteLLM:
 #   1. Rewrites response_format=text|json → verbose_json on the REQUEST side
 #      ("ensures 'duration' is received - used for cost calculation"). This
-#      breaks speaches' parakeet executor (refuses verbose_json) AND clobbers
-#      the client's choice of `text` vs `json`.
+#      clobbers the client's choice of `text` vs `json` and can confuse
+#      backends that handle each format natively.
 #   2. Wraps raw-text RESPONSES (srt/vtt/text) into a JSON envelope
 #      `{"text": "<raw body>", "usage": null}` instead of passing them
 #      through as the correct Content-Type body the OpenAI HTTP API
 #      specifies (text/plain, application/x-subrip, text/vtt).
 #
-# Both behaviours are wrong for our internal STT services (talkies,
-# asr-canary, speaches) — all of them implement the full OpenAI shape
-# natively. The patches below:
-#   - skip request rewrite for `local-talkies-*`, `local-asr-canary-*`,
-#     `local-speaches-*` so client format passes through to the backend
+# Both behaviours are wrong for talkies — it implements the full OpenAI
+# shape natively. The patches below:
+#   - skip request rewrite for `local-talkies-*` so client format passes
+#     through to the backend
 #   - intercept the response and, when format is text/srt/vtt, return a
 #     FastAPI PlainTextResponse with the proper media_type so the client
 #     sees raw body bytes instead of a JSON envelope
@@ -561,12 +402,11 @@ class ResourceManager(CustomLogger):
 
 # Substring match against the *backend* model name (i.e. after the
 # `openai/` prefix is stripped — e.g. `whisper-large-v3`, `canary-180m-flash`,
-# `parakeet-tdt-0.6b-v3`). All talkies/asr-canary/speaches models match.
+# `parakeet-tdt-0.6b-v3`). All talkies ASR models match.
 _NATIVE_FORMAT_SUBSTRINGS = (
     "parakeet",
     "whisper",
     "canary",
-    "distil-whisper",
 )
 
 _RAW_TEXT_FORMATS = {

@@ -23,10 +23,10 @@ _talkies_host() {
 
 _talkies_models_for_mode() {
     if [ "${TALKIES_CUDA:-0}" = "1" ]; then
-        echo "whisper-large-v3 whisper-large-v3-turbo distil-whisper-large-v3 parakeet-tdt-0.6b-v3 canary-180m-flash canary-1b-flash canary-qwen-2.5b"
+        echo "whisper-large-v3 whisper-large-v3-turbo parakeet-tdt-0.6b-v3 canary-180m-flash canary-1b-flash canary-qwen-2.5b"
         return
     fi
-    echo "whisper-large-v3 whisper-large-v3-turbo distil-whisper-large-v3 canary-180m-flash"
+    echo "whisper-large-v3 whisper-large-v3-turbo canary-180m-flash"
 }
 
 _talkies_exec_get() {

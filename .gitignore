@@ -7,6 +7,39 @@ CLAUDE.md
 git-update.sh
 litellm/config.yaml
 
+# Python build / cache junk
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+
+# Editor / IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Scratch / test artifacts at the repo root (probe outputs, downloaded
+# fixtures, etc.). Anything we genuinely want committed belongs under
+# `tests/.fixtures/` or a service subdir.
+/RE*.wav
+/RE*.txt
+/*.mp3.log
+/probe_*.py
+/probe_*.log
+
 # data dirs — ignore everything, except the .gitkeep placeholders we know about
 .data/**
 !.data/postgres/
@@ -37,8 +70,10 @@ litellm/config.yaml
 !.data/ollama/.gitkeep
 !.data/ollama-gpu/
 !.data/ollama-gpu/.gitkeep
-!.data/speaches/
-!.data/speaches/.gitkeep
+!.data/talkies/
+!.data/talkies/.gitkeep
+!.data/talkies/custom-voices/
+!.data/talkies/custom-voices/.gitkeep
 !.data/tailscale/
 !.data/tailscale/.gitkeep
 !.data/mailbox/

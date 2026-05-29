@@ -35,7 +35,7 @@ _has_image_providers() {
 }
 
 _has_tts_providers() {
-    [ "${SPEACHES:-}" = "1" ] || [ "${QWEN_TTS_CUDA:-}" = "1" ] || [ "${OPENAI:-}" = "1" ]
+    [ "${TALKIES:-}" = "1" ] || [ "${TALKIES_CUDA:-}" = "1" ] || [ "${OPENAI:-}" = "1" ]
 }
 
 test_mcp_media_tools_present() {
@@ -93,13 +93,17 @@ test_mcp_media_tool_descriptions() {
         tts_desc=$(_mcp_tool_description "mcp_tools-generate_tts")
         assert_not_empty "$tts_desc" "generate_tts has description" || return 1
 
-        if [ "${SPEACHES:-}" = "1" ]; then
-            assert_contains "$tts_desc" "local-speaches-kokoro-tts" \
-                "tts description lists kokoro (SPEACHES=1)" || return 1
+        if [ "${TALKIES:-}" = "1" ]; then
+            assert_contains "$tts_desc" "local-talkies-kokoro-tts" \
+                "tts description lists kokoro (TALKIES=1)" || return 1
         fi
-        if [ "${QWEN_TTS_CUDA:-}" = "1" ]; then
-            assert_contains "$tts_desc" "local-qwen3-cuda-tts" \
-                "tts description lists qwen3-cuda (QWEN_TTS_CUDA=1)" || return 1
+        if [ "${TALKIES_CUDA:-}" = "1" ]; then
+            assert_contains "$tts_desc" "local-talkies-cuda-kokoro-tts" \
+                "tts description lists kokoro-cuda (TALKIES_CUDA=1)" || return 1
+        fi
+        if [ "${TALKIES_CUDA:-}" = "1" ]; then
+            assert_contains "$tts_desc" "local-talkies-cuda-qwen3-tts" \
+                "tts description lists talkies-cuda Qwen3-TTS (TALKIES_CUDA=1)" || return 1
         fi
         if [ "${OPENAI:-}" = "1" ]; then
             assert_contains "$tts_desc" "openai-tts-1" \

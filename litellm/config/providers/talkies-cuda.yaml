@@ -14,14 +14,6 @@
   model_info:
     mode: audio_transcription
 
-- model_name: local-talkies-cuda-distil-whisper-large-v3
-  litellm_params:
-    model: openai/distil-whisper-large-v3
-    api_base: http://talkies-cuda:8000/v1
-    api_key: none
-  model_info:
-    mode: audio_transcription
-
 - model_name: local-talkies-cuda-parakeet-tdt-0.6b-v3
   litellm_params:
     model: openai/parakeet-tdt-0.6b-v3
@@ -53,3 +45,25 @@
     api_key: none
   model_info:
     mode: audio_transcription
+
+# Kokoro TTS shares the same talkies-cuda container as of v0.3.0 —
+# `POST /v1/audio/speech` routed to the same upstream.
+- model_name: local-talkies-cuda-kokoro-tts
+  litellm_params:
+    model: openai/kokoro-82m
+    api_base: http://talkies-cuda:8000/v1
+    api_key: none
+  model_info:
+    mode: audio_speech
+
+# Qwen3-TTS voice cloning, also inside talkies-cuda as of v0.4.0.
+# Sample voices `alloy`/`echo`/`fable` ship in-image; drop your own
+# `<name>.wav` into ${DATA_DIR_TALKIES}/custom-voices/ on the host and
+# use `voice=<name>` (nested paths e.g. `clients/acme/jane` supported).
+- model_name: local-talkies-cuda-qwen3-tts
+  litellm_params:
+    model: openai/qwen3-tts-0.6b
+    api_base: http://talkies-cuda:8000/v1
+    api_key: none
+  model_info:
+    mode: audio_speech

@@ -338,104 +338,61 @@ Local image generation via [stable-diffusion.cpp](https://github.com/leejet/stab
 
 ---
 
-## asr-canary — Local NeMo Canary STT (optional, `ASR_CANARY=1` or `ASR_CANARY_CUDA=1`)
+## talkies — Unified OpenAI-compatible speech (optional, `TALKIES=1` or `TALKIES_CUDA=1`)
 
-In-repo Python/FastAPI wrapper around [NVIDIA NeMo Canary](https://huggingface.co/nvidia/canary-180m-flash) ASR models. Exposes an OpenAI-compatible `/v1/audio/transcriptions` endpoint plus speaches-compatible `/api/ps` resource-management endpoints so the LiteLLM CUDA/CPU resource manager can evict it on competing-job arrival. CPU build ships only `canary-180m-flash`; CUDA build ships all three (`canary-180m-flash`, `canary-1b-flash`, `canary-qwen-2.5b`).
-
-Source: `aigate/asr-canary/` (Python 3.12, FastAPI, `nemo-toolkit[asr]`).
+External image: [`psyb0t/talkies`](https://github.com/psyb0t/docker-talkies) (pinned to `v0.4.0` / `v0.4.0-cuda`). One container, both endpoints: `POST /v1/audio/transcriptions` (whisper + canary + parakeet) and `POST /v1/audio/speech` (Kokoro-82M TTS, plus Qwen3-TTS voice cloning on CUDA). CPU image ships the four ASR models that run reasonably without a GPU (three Whisper variants + `canary-180m-flash`) plus Kokoro. CUDA image adds Parakeet-TDT, Canary-1B-Flash, Canary-Qwen-2.5B SALM, and Qwen3-TTS-0.6B (voice cloning, 17 languages) on top. Kokoro stays CPU-bound in both images.
 
 ### Endpoints (internal — accessed through LiteLLM, not directly via nginx)
 
 | Endpoint | URL | Description |
 | -------- | --- | ----------- |
-| Transcribe | `POST /v1/audio/transcriptions` | OpenAI-compatible multipart upload (`file`, `model`, `language`, `response_format`, `timestamp_granularities[]`) — supports `json`, `text`, `verbose_json`, `srt`, `vtt` |
-| List models | `GET /v1/models` | Configured model_ids from `models.json` / `models-cpu.json` |
-| Loaded models | `GET /api/ps` | Currently loaded backends + `idle_seconds` (speaches-compat) |
-| Unload one | `DELETE /api/ps/{model_id}` | Evict one model from RAM/VRAM (URL-encoded, speaches-compat) |
+| Transcribe | `POST /v1/audio/transcriptions` | OpenAI-compatible multipart upload (`file`, `model`, `language`, `response_format`, `timestamp_granularities[]`, `diarization`). Supports `json`, `text`, `verbose_json`, `srt`, `vtt`. Stereo channel-split diarization via `diarization=true` — segments + words get a `"channel": "L"/"R"` field. |
+| Speech | `POST /v1/audio/speech` | OpenAI-compatible TTS — Kokoro-82M behind `kokoro-82m` slug. JSON body with `model`, `input`, `voice`, `response_format` (`mp3`/`opus`/`aac`/`flac`/`wav`/`pcm`). |
+| List models | `GET /v1/models` | Configured model_ids |
+| Loaded models | `GET /api/ps` | Currently loaded backends + `idle_seconds` |
+| Unload one | `DELETE /api/ps/{model_id}` | Evict one model from RAM/VRAM (URL-encoded) |
 | Unload all | `POST /unload` | Evict every loaded backend |
+| List voices | `GET /v1/audio/voices` | Available Kokoro voices |
 | Health | `GET /healthz` | Liveness + device + configured model_ids |
 
 ### Models
 
-**CPU** (`ASR_CANARY=1`): `canary-180m-flash` (175M params, English, FastConformer encoder).
+**CPU** (`TALKIES=1`):
+- `whisper-large-v3`, `whisper-large-v3-turbo` — multilingual ASR
+- `canary-180m-flash` — English ASR (FastConformer)
+- `kokoro-82m` — TTS, ~41 voices across en/es/fr/hi/it/pt
 
-**CUDA** (`ASR_CANARY_CUDA=1`): `canary-180m-flash`, `canary-1b-flash` (883M, EN/DE/FR/ES + EN↔X translation), `canary-qwen-2.5b` (NeMo SALM — hybrid ASR encoder + Qwen2.5 LLM decoder, English, emits punctuation/casing + can answer audio prompts).
+**CUDA** (`TALKIES_CUDA=1`): all of the above plus
+- `parakeet-tdt-0.6b-v3` — 25 European languages (NeMo RNNT)
+- `canary-1b-flash` — EN/DE/FR/ES + EN↔X translation (NeMo multitask)
+- `canary-qwen-2.5b` — English, NeMo SALM hybrid ASR+LLM (text-only; no per-word timestamps)
+- `qwen3-tts-0.6b` — voice cloning, 17 languages (en, zh, ja, ko, fr, de, es, it, pt, ru, vi, th, id, ar, tr, pl, nl). Drop a `<name>.wav` (10-30s clean speech) into `${DATA_DIR_TALKIES}/custom-voices/` on the host (mounted as `/data/custom-voices` inside the container) and use `voice=<name>` on `/v1/audio/speech`. Samples `alloy`/`echo`/`fable` baked in. Nested paths supported (`voice=clients/acme/jane` → `${DATA_DIR_TALKIES}/custom-voices/clients/acme/jane.wav`).
 
 ### Behavior
 
-- **Pre-pulled, not lazy**: `asr-canary-pull` / `asr-canary-cuda-pull` containers run on `aigate-public` at startup and download weights via `huggingface-cli` into `${DATA_DIR_ASR_CANARY}/hf`. Main containers run on `aigate-internal` (no egress) and load from the cache on first request.
-- **Lazy load into memory**: weights stay on disk until a transcription request arrives; first request takes the cold-load hit, subsequent requests are warm.
-- **Idle TTL unload**: background sweeper unloads any model idle longer than `ASR_CANARY_MODEL_TTL` (default 600s). Weights stay on disk; next request warm-loads.
-- **CUDA resource manager**: `local-asr-canary-cuda-*` aliases participate in the `cuda-stt` group. A competing CUDA job (LLM, image gen, TTS, other STT) triggers `DELETE /api/ps/{model_id}` for every loaded canary model before the job runs.
-- **CPU resource manager**: `local-asr-canary-180m-flash` participates in the `cpu-stt` group, evicted on competing CPU job arrival.
-- **Audio preprocessing**: any container/codec is ffmpeg-converted to 16 kHz mono WAV before NeMo sees it.
-- **Timestamps (OpenAI-shape `verbose_json`)**: `canary-180m-flash` and `canary-1b-flash` (multitask backends) emit segment + word timestamps via NeMo's `timestamps=True`. The wrapper normalizes the output to the same shape Whisper returns (`{task, language, duration, text, segments:[{id,start,end,text,…}], words:[{word,start,end}]}`), null-filling whisper-only fields (`avg_logprob`, `no_speech_prob`, `compression_ratio`, `tokens`). `srt` and `vtt` formats are built from the segments. `canary-qwen-2.5b` (SALM backend) is text-only — `verbose_json` requests succeed but return empty `segments` / `words`. LiteLLM proxies repeated form fields to single values, so the wrapper always emits both segments and words regardless of `timestamp_granularities[]` selection.
+- **Lazy load + idle TTL unload**: weights download on first request, sit on disk in `${DATA_DIR_TALKIES}` (HF cache layout). A background sweeper unloads any model idle longer than `TALKIES_MODEL_TTL` (default `10m`); next request warm-reloads from disk.
+- **Sibling eviction**: only one model resident per talkies container at a time. When request N arrives for a different model, talkies evicts the prior one before loading.
+- **Resource-manager aware**: `local-talkies-cuda-*` participates in the `cuda-stt-talkies` group, `local-talkies-*` in `cpu-stt-talkies`. A competing job (LLM, image gen, TTS, other STT) triggers `DELETE /api/ps/{model_id}` for every model before its own load.
+- **VAD chunking**: long audio is sliced via Silero VAD into ≤28-second speech regions before each backend forward pass, then results are stitched into one Whisper-shape timeline. Backends that don't support timeline assembly (the SALM `canary-qwen-2.5b`) concatenate per-chunk text without timestamps.
+- **Audio preprocessing**: any container/codec is ffmpeg-converted to 16 kHz mono WAV before the backend sees it. Stereo `diarization=true` splits L/R into two mono streams, transcribes each, and time-interleaves the segments with channel tags.
+- **OpenAI parity**: every response_format returns the correct Content-Type body — `text/plain` for `text`, `application/x-subrip` for `srt`, `text/vtt` for `vtt`, `application/json` for `json` / `verbose_json`. `verbose_json` carries `text`, `language`, `duration`, `segments[{id,start,end,text,channel?,…}]`, `words[{word,start,end,channel?}]`.
 
 ### Environment variables
 
 | Variable | Default | Description |
 | -------- | ------- | ----------- |
-| `ASR_CANARY_MODEL_TTL` / `ASR_CANARY_CUDA_MODEL_TTL` | `600` | Idle seconds before unload (`-1` disables) |
-| `ASR_CANARY_SWEEPER_INTERVAL` / `ASR_CANARY_CUDA_SWEEPER_INTERVAL` | `60` | Idle sweeper poll interval (seconds) |
-| `ASR_CANARY_MAX_UPLOAD_BYTES` / `ASR_CANARY_CUDA_MAX_UPLOAD_BYTES` | `104857600` | Max audio upload size (bytes) |
-| `ASR_CANARY_LOG_LEVEL` / `ASR_CANARY_CUDA_LOG_LEVEL` | `INFO` | Log level |
-| `ASR_CANARY_PRELOAD` / `ASR_CANARY_CUDA_PRELOAD` | _empty_ | Comma-separated model_ids to load into memory at boot |
-| `ASR_CANARY_PREFETCH` / `ASR_CANARY_CUDA_PREFETCH` | _empty_ | Comma-separated model_ids to additionally HF-snapshot at boot inside the main container (pull container already handles the default set) |
-| `ASR_CANARY_MEM_LIMIT` / `ASR_CANARY_CUDA_MEM_LIMIT` | `6g` / `8g` | Container memory limit |
-| `ASR_CANARY_CPUS` / `ASR_CANARY_CUDA_CPUS` | `4.0` | Container CPU limit |
-| `DATA_DIR_ASR_CANARY` | `${DATA_DIR}/asr-canary` | HF cache directory (shared by CPU + CUDA) |
-
----
-
-## vllm — Local vLLM audio-LLM (optional, `VLLM_CUDA=1`)
-
-In-repo Python/FastAPI wrapper that supervises a single `vllm serve` subprocess and proxies OpenAI-compatible endpoints. Each registered model is exposed via **both** `/v1/audio/transcriptions` (as `*-transcribe`) and `/v1/chat/completions` (as `*-chat`) — same upstream model, two LiteLLM aliases. Only one model is resident in VRAM at a time; switching models restarts the vLLM subprocess. Also exposes speaches-compatible `/api/ps` for the LiteLLM CUDA resource manager.
-
-Source: `aigate/vllm/` (Python 3.12, FastAPI, base image `vllm/vllm-openai:v0.21.0`).
-
-### Endpoints (internal — accessed through LiteLLM, not directly via nginx)
-
-| Endpoint | URL | Description |
-| -------- | --- | ----------- |
-| Transcribe | `POST /v1/audio/transcriptions` | OpenAI-compatible multipart upload (`file`, `model`, ...) |
-| Chat | `POST /v1/chat/completions` | OpenAI-compatible chat with audio input parts (supports streaming) |
-| List models | `GET /v1/models` | Configured model_ids from `models.json` |
-| Loaded model | `GET /api/ps` | Currently resident model + `idle_seconds` (speaches-compat) |
-| Unload one | `DELETE /api/ps/{model_id}` | Stop subprocess for the named model (speaches-compat) |
-| Unload all | `POST /unload` | Stop the resident subprocess |
-| Health | `GET /healthz` | Liveness + configured model_ids |
-
-### Models served (CUDA)
-
-| model_id | HF repo | Approx VRAM |
-| -------- | ------- | ----------- |
-| `qwen3-asr-1.7b` | `Qwen/Qwen3-ASR-1.7B` | ~8 GB |
-| `voxtral-mini-3b` | `mistralai/Voxtral-Mini-3B-2507` | ~10 GB |
-
-### Behavior
-
-- **One subprocess at a time**: the wrapper supervises a single `vllm serve` child on `127.0.0.1:${VLLM_WRAP_SUBPROCESS_PORT}` (default `18000`). Switching models = SIGTERM the old one, wait for drain, spawn the new one.
-- **Pre-pulled, not lazy**: `vllm-cuda-pull` sidecar runs on `aigate-public` at startup and downloads both repos via `huggingface_hub.snapshot_download` into `${DATA_DIR_VLLM}/hf`. Main container runs on `aigate-internal` (no egress).
-- **Lazy spawn**: subprocess starts only on first request to a given model.
-- **Idle TTL kill**: background sweeper kills the subprocess after `VLLM_CUDA_MODEL_TTL` (default 600s). Weights stay on disk.
-- **In-flight drain**: kill path waits up to 30s for in-flight requests to finish, then `SIGTERM` (20s) → `SIGKILL` (10s).
-- **CUDA resource manager**: `local-vllm-cuda-*` aliases participate in the `cuda-vllm` group. A competing CUDA job (LLM, image gen, TTS, other STT) triggers `DELETE /api/ps/{model_id}` before the job runs.
-- **Two aliases per model**: `local-vllm-cuda-<id>-transcribe` (mode `audio_transcription`) and `local-vllm-cuda-<id>-chat` (mode `chat`) — both proxy to the same upstream model_id, so endpoint-switching is free; only model-switching restarts vllm.
-
-### Environment variables
-
-| Variable | Default | Description |
-| -------- | ------- | ----------- |
-| `VLLM_CUDA_MODEL_TTL` | `600` | Idle seconds before subprocess kill (`-1` disables) |
-| `VLLM_CUDA_SWEEPER_INTERVAL` | `60` | Idle sweeper poll interval (seconds) |
-| `VLLM_CUDA_LOAD_TIMEOUT` | `600` | Max seconds to wait for `vllm serve` `/health` to return 200 |
-| `VLLM_CUDA_REQUEST_TIMEOUT` | `300` | Per-request proxy timeout (seconds) |
-| `VLLM_CUDA_LOG_LEVEL` | `INFO` | Log level |
-| `VLLM_CUDA_PRELOAD` | _empty_ | model_id to spawn at boot (only one allowed — single-subprocess) |
-| `VLLM_CUDA_PREFETCH` | _empty_ | Comma-separated model_ids to additionally HF-snapshot at boot inside the main container (pull container already handles the default set) |
-| `VLLM_CUDA_MEM_LIMIT` | `12g` | Container memory limit |
-| `VLLM_CUDA_CPUS` | `4.0` | Container CPU limit |
-| `DATA_DIR_VLLM` | `${DATA_DIR}/vllm` | HF cache directory |
+| `TALKIES_MODEL_TTL` / `TALKIES_CUDA_MODEL_TTL` | `10m` | Idle duration before unload (`-1` disables). Accepts bare seconds or Go-style strings (`3h30m5s`, `45m`, `90s`). |
+| `TALKIES_SWEEPER_INTERVAL` / `TALKIES_CUDA_SWEEPER_INTERVAL` | `1m` | Idle sweeper poll interval |
+| `TALKIES_LOAD_TIMEOUT` / `TALKIES_CUDA_LOAD_TIMEOUT` | `5m` | Max wait for model load before the request errors |
+| `TALKIES_MAX_UPLOAD_BYTES` / `TALKIES_CUDA_MAX_UPLOAD_BYTES` | `104857600` | Max audio upload size (bytes) |
+| `TALKIES_LOG_LEVEL` / `TALKIES_CUDA_LOG_LEVEL` | `INFO` | Log level |
+| `TALKIES_PRELOAD` / `TALKIES_CUDA_PRELOAD` | _empty_ | Comma-separated model_ids to load at boot |
+| `TALKIES_PREFETCH` / `TALKIES_CUDA_PREFETCH` | _empty_ | Comma-separated model_ids to HF-snapshot at boot (download only, don't load into memory) |
+| `TALKIES_VAD_CHUNK_THRESHOLD` / `TALKIES_CUDA_VAD_CHUNK_THRESHOLD` | `30` | Audio length (seconds) above which VAD chunking kicks in |
+| `TALKIES_VAD_MAX_SPEECH` / `TALKIES_CUDA_VAD_MAX_SPEECH` | `28` | Max chunk length fed to a single forward pass |
+| `TALKIES_MEM_LIMIT` / `TALKIES_CUDA_MEM_LIMIT` | `8g` / `12g` | Container memory limit |
+| `TALKIES_CPUS` / `TALKIES_CUDA_CPUS` | `4.0` | Container CPU limit |
+| `DATA_DIR_TALKIES` | `${DATA_DIR}/talkies` | Bind-mount root for talkies' `/data` dir. Contains `hf/hub/models--*/` (HF cache, shared by CPU + CUDA) and — for CUDA — `custom-voices/<name>.wav` (Qwen3-TTS reference voices). |
 
 ---
 

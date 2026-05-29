@@ -132,57 +132,25 @@ if [ "${OLLAMA_CUDA:-}" = "1" ]; then
     )
 fi
 
-# qwen3 cuda tts — only expected when QWEN_TTS_CUDA=1
-if [ "${QWEN_TTS_CUDA:-}" = "1" ]; then
+# Qwen3-TTS lives inside talkies-cuda as of v0.4.0 — alias is published
+# whenever TALKIES_CUDA=1 (same trigger as the rest of the cuda set).
+if [ "${TALKIES_CUDA:-}" = "1" ]; then
     EXPECTED_MODELS+=(
-        "local-qwen3-cuda-tts"
+        "local-talkies-cuda-qwen3-tts"
     )
 fi
 
-# speaches-cuda models — only expected when SPEACHES_CUDA=1
-if [ "${SPEACHES_CUDA:-}" = "1" ]; then
+# talkies Kokoro TTS — bundled into the talkies/talkies-cuda containers
+# (v0.3.0+), so the slug is published whenever the respective profile is on.
+if [ "${TALKIES:-}" = "1" ]; then
     EXPECTED_MODELS+=(
-        "local-speaches-cuda-whisper-distil-large-v3"
-        "local-speaches-cuda-whisper-large-v3-turbo"
-        "local-speaches-cuda-parakeet-tdt-0.6b"
-        "local-speaches-cuda-parakeet-tdt-0.6b-v3"
+        "local-talkies-kokoro-tts"
     )
 fi
 
-# speaches models — only expected when SPEACHES=1
-if [ "${SPEACHES:-}" = "1" ]; then
+if [ "${TALKIES_CUDA:-}" = "1" ]; then
     EXPECTED_MODELS+=(
-        "local-speaches-kokoro-tts"
-        "local-speaches-whisper-distil-large-v3"
-        "local-speaches-whisper-large-v3-turbo"
-        "local-speaches-parakeet-tdt-0.6b"
-        "local-speaches-parakeet-tdt-0.6b-v3"
-    )
-fi
-
-# asr-canary CPU models — only expected when ASR_CANARY=1
-if [ "${ASR_CANARY:-}" = "1" ]; then
-    EXPECTED_MODELS+=(
-        "local-asr-canary-180m-flash"
-    )
-fi
-
-# asr-canary CUDA models — only expected when ASR_CANARY_CUDA=1
-if [ "${ASR_CANARY_CUDA:-}" = "1" ]; then
-    EXPECTED_MODELS+=(
-        "local-asr-canary-cuda-180m-flash"
-        "local-asr-canary-cuda-1b-flash"
-        "local-asr-canary-cuda-qwen-2.5b"
-    )
-fi
-
-# vllm CUDA models — only expected when VLLM_CUDA=1
-if [ "${VLLM_CUDA:-}" = "1" ]; then
-    EXPECTED_MODELS+=(
-        "local-vllm-cuda-qwen3-asr-1.7b-transcribe"
-        "local-vllm-cuda-qwen3-asr-1.7b-chat"
-        "local-vllm-cuda-voxtral-mini-3b-transcribe"
-        "local-vllm-cuda-voxtral-mini-3b-chat"
+        "local-talkies-cuda-kokoro-tts"
     )
 fi
 
@@ -284,11 +252,11 @@ test_litellm_model_groups() {
     echo "OK: litellm_model_groups"
 }
 
-# ── CPU TTS via speaches (SPEACHES=1) ─────────────────────────────────────
+# ── CPU TTS via talkies Kokoro (TALKIES=1) ────────────────────────────────
 
 test_litellm_cpu_tts() {
-    if [ "${SPEACHES:-}" != "1" ]; then
-        echo "OK: litellm_cpu_tts (skipped — SPEACHES not enabled)"
+    if [ "${TALKIES:-}" != "1" ]; then
+        echo "OK: litellm_cpu_tts (skipped — TALKIES not enabled)"
         return 0
     fi
     local tmpfile
@@ -298,7 +266,7 @@ test_litellm_cpu_tts() {
         -X POST "$BASE_URL/v1/audio/speech" \
         -H "Content-Type: application/json" \
         -H "$AUTH_HEADER" \
-        -d '{"model":"local-speaches-kokoro-tts","input":"hello world","voice":"af_heart"}')
+        -d '{"model":"local-talkies-kokoro-tts","input":"hello world","voice":"af_heart"}')
     assert_eq "$code" "200" "cpu tts returns 200" || { rm -f "$tmpfile"; return 1; }
     local size
     size=$(wc -c < "$tmpfile")
@@ -308,11 +276,11 @@ test_litellm_cpu_tts() {
     echo "OK: litellm_cpu_tts"
 }
 
-# ── CPU STT via speaches (SPEACHES=1) ─────────────────────────────────────
+# ── CPU STT via talkies (TALKIES=1) ───────────────────────────────────────
 
 test_litellm_cpu_stt() {
-    if [ "${SPEACHES:-}" != "1" ]; then
-        echo "OK: litellm_cpu_stt (skipped — SPEACHES not enabled)"
+    if [ "${TALKIES:-}" != "1" ]; then
+        echo "OK: litellm_cpu_stt (skipped — TALKIES not enabled)"
         return 0
     fi
     # first generate a known phrase via TTS
@@ -323,14 +291,14 @@ test_litellm_cpu_stt() {
         -X POST "$BASE_URL/v1/audio/speech" \
         -H "Content-Type: application/json" \
         -H "$AUTH_HEADER" \
-        -d '{"model":"local-speaches-kokoro-tts","input":"hello world","voice":"af_heart"}')
+        -d '{"model":"local-talkies-kokoro-tts","input":"hello world","voice":"af_heart"}')
     assert_eq "$code" "200" "tts for stt roundtrip returns 200" || { rm -f "$tts_file"; return 1; }
 
     local out
     out=$(curl -sf --max-time 120 \
         -X POST "$BASE_URL/v1/audio/transcriptions" \
         -H "$AUTH_HEADER" \
-        -F "model=local-speaches-whisper-distil-large-v3" \
+        -F "model=local-talkies-whisper-large-v3-turbo" \
         -F "file=@$tts_file")
     rm -f "$tts_file"
     assert_contains "$out" "text" "stt response has text field" || return 1
@@ -338,11 +306,11 @@ test_litellm_cpu_stt() {
     echo "OK: litellm_cpu_stt"
 }
 
-# ── TTS→STT round-trip check (SPEACHES=1) ─────────────────────────────────
+# ── TTS→STT round-trip check (TALKIES=1) ──────────────────────────────────
 
 test_litellm_tts_stt_roundtrip() {
-    if [ "${SPEACHES:-}" != "1" ]; then
-        echo "OK: litellm_tts_stt_roundtrip (skipped — SPEACHES not enabled)"
+    if [ "${TALKIES:-}" != "1" ]; then
+        echo "OK: litellm_tts_stt_roundtrip (skipped — TALKIES not enabled)"
         return 0
     fi
     local phrase="testing one two three"
@@ -354,14 +322,14 @@ test_litellm_tts_stt_roundtrip() {
         -X POST "$BASE_URL/v1/audio/speech" \
         -H "Content-Type: application/json" \
         -H "$AUTH_HEADER" \
-        -d "{\"model\":\"local-speaches-kokoro-tts\",\"input\":\"$phrase\",\"voice\":\"af_heart\"}")
+        -d "{\"model\":\"local-talkies-kokoro-tts\",\"input\":\"$phrase\",\"voice\":\"af_heart\"}")
     assert_eq "$code" "200" "tts round-trip step" || { rm -f "$tts_file"; return 1; }
 
     local out
     out=$(curl -sf --max-time 120 \
         -X POST "$BASE_URL/v1/audio/transcriptions" \
         -H "$AUTH_HEADER" \
-        -F "model=local-speaches-whisper-distil-large-v3" \
+        -F "model=local-talkies-whisper-large-v3-turbo" \
         -F "file=@$tts_file")
     rm -f "$tts_file"
     assert_contains_icase "$out" "testing" "round-trip transcript contains 'testing'" || return 1
@@ -370,48 +338,34 @@ test_litellm_tts_stt_roundtrip() {
     echo "OK: litellm_tts_stt_roundtrip"
 }
 
-# ── resource manager fires and logs unloads (SPEACHES=1) ──────────────────
+# ── resource manager fires and logs unloads (TALKIES=1) ───────────────────
 
 test_litellm_resource_manager() {
-    if [ "${SPEACHES:-}" != "1" ]; then
-        echo "OK: litellm_resource_manager (skipped — SPEACHES not enabled)"
+    if [ "${TALKIES:-}" != "1" ]; then
+        echo "OK: litellm_resource_manager (skipped — TALKIES not enabled)"
         return 0
     fi
 
-    # TTS request — competing groups: cpu-llm, cpu-stt
-    local tts_file
-    tts_file=$(mktemp /tmp/litellm_rm_XXXXXX.mp3)
-    curl -s -o "$tts_file" --max-time 60 \
-        -X POST "$BASE_URL/v1/audio/speech" \
-        -H "Content-Type: application/json" \
-        -H "$AUTH_HEADER" \
-        -d '{"model":"local-speaches-kokoro-tts","input":"resource manager test","voice":"af_heart"}' > /dev/null
-    rm -f "$tts_file"
-    local tts_logs
-    tts_logs=$(docker compose -f "$WORKDIR/docker-compose.yml" logs --since 15s litellm 2>/dev/null)
-    assert_contains "$tts_logs" "group=cpu-tts" "tts: resource manager identified cpu-tts group" || return 1
-    assert_contains "$tts_logs" "unloading competing" "tts: resource manager logged competing unload" || return 1
-    # should log cpu-llm unload attempt (either "unloading cpu-llm models" or "no models loaded")
-    assert_contains "$tts_logs" "cpu-llm" "tts: resource manager logged cpu-llm handling" || return 1
-
-    # STT request — competing groups: cpu-tts, cpu-llm
+    # STT request against the CPU talkies group — competing groups include
+    # cpu-llm. Resource manager should log the group + at least one unload.
     local stt_file
     stt_file=$(mktemp /tmp/litellm_rm_stt_XXXXXX.mp3)
     curl -s -o "$stt_file" --max-time 60 \
         -X POST "$BASE_URL/v1/audio/speech" \
         -H "Content-Type: application/json" \
         -H "$AUTH_HEADER" \
-        -d '{"model":"local-speaches-kokoro-tts","input":"hello","voice":"af_heart"}' > /dev/null
+        -d '{"model":"local-talkies-kokoro-tts","input":"hello","voice":"af_heart"}' > /dev/null
     curl -sf --max-time 120 \
         -X POST "$BASE_URL/v1/audio/transcriptions" \
         -H "$AUTH_HEADER" \
-        -F "model=local-speaches-whisper-distil-large-v3" \
+        -F "model=local-talkies-whisper-large-v3-turbo" \
         -F "file=@$stt_file" > /dev/null
     rm -f "$stt_file"
     local stt_logs
     stt_logs=$(docker compose -f "$WORKDIR/docker-compose.yml" logs --since 150s litellm 2>/dev/null)
-    assert_contains "$stt_logs" "group=cpu-stt" "stt: resource manager identified cpu-stt group" || return 1
-    assert_contains "$stt_logs" "cpu-tts" "stt: resource manager logged cpu-tts handling" || return 1
+    assert_contains "$stt_logs" "group=cpu-stt-talkies" "stt: resource manager identified cpu-stt-talkies group" || return 1
+    assert_contains "$stt_logs" "unloading competing" "stt: resource manager logged competing unload" || return 1
+    assert_contains "$stt_logs" "cpu-llm" "stt: resource manager logged cpu-llm handling" || return 1
 
     echo "OK: litellm_resource_manager"
 }
@@ -419,36 +373,36 @@ test_litellm_resource_manager() {
 # ── CUDA resource manager unloads on CUDA requests ──────────────────────────
 
 test_litellm_cuda_resource_manager() {
-    if [ "${QWEN_TTS_CUDA:-}" != "1" ]; then
-        echo "OK: litellm_cuda_resource_manager (skipped — QWEN_TTS_CUDA not enabled)"
+    if [ "${TALKIES_CUDA:-}" != "1" ]; then
+        echo "OK: litellm_cuda_resource_manager (skipped — TALKIES_CUDA not enabled)"
         return 0
     fi
 
-    # CUDA TTS request — competing groups: cuda-llm, cuda-stt
+    # CUDA TTS request via talkies' Qwen3-TTS — competing CUDA groups include
+    # cuda-llm and cuda-img. Resource manager should log the group + at least
+    # one competing-unload attempt.
     local tts_file
     tts_file=$(mktemp /tmp/litellm_cuda_rm_XXXXXX.mp3)
     curl -s -o "$tts_file" --max-time 120 \
         -X POST "$BASE_URL/v1/audio/speech" \
         -H "Content-Type: application/json" \
         -H "$AUTH_HEADER" \
-        -d '{"model":"local-qwen3-cuda-tts","input":"cuda resource manager test","voice":"alloy"}' > /dev/null
+        -d '{"model":"local-talkies-cuda-qwen3-tts","input":"cuda resource manager test","voice":"alloy"}' > /dev/null
     rm -f "$tts_file"
     local tts_logs
     tts_logs=$(docker compose -f "$WORKDIR/docker-compose.yml" logs --since 20s litellm 2>/dev/null)
-    assert_contains "$tts_logs" "group=cuda-tts" "cuda tts: resource manager identified cuda-tts group" || return 1
+    assert_contains "$tts_logs" "group=cuda-stt-talkies" "cuda tts: resource manager identified cuda-stt-talkies group" || return 1
     assert_contains "$tts_logs" "unloading competing" "cuda tts: resource manager logged competing unload" || return 1
     assert_contains "$tts_logs" "cuda-llm" "cuda tts: resource manager logged cuda-llm handling" || return 1
-    # qwen3-cuda-tts unload should be attempted for cuda-tts group competing (cuda-stt has it)
-    assert_contains "$tts_logs" "cuda-stt" "cuda tts: resource manager logged cuda-stt handling" || return 1
 
     echo "OK: litellm_cuda_resource_manager"
 }
 
-# ── CUDA TTS via qwen3-cuda-tts (QWEN_TTS_CUDA=1) ───────────────────────────
+# ── CUDA TTS via talkies-cuda Qwen3-TTS (TALKIES_CUDA=1) ──────────────────
 
 test_litellm_cuda_tts() {
-    if [ "${QWEN_TTS_CUDA:-}" != "1" ]; then
-        echo "OK: litellm_cuda_tts (skipped — QWEN_TTS_CUDA not enabled)"
+    if [ "${TALKIES_CUDA:-}" != "1" ]; then
+        echo "OK: litellm_cuda_tts (skipped — TALKIES_CUDA not enabled)"
         return 0
     fi
     local tmpfile
@@ -458,7 +412,7 @@ test_litellm_cuda_tts() {
         -X POST "$BASE_URL/v1/audio/speech" \
         -H "Content-Type: application/json" \
         -H "$AUTH_HEADER" \
-        -d '{"model":"local-qwen3-cuda-tts","input":"hello from CUDA","voice":"alloy"}')
+        -d '{"model":"local-talkies-cuda-qwen3-tts","input":"hello from CUDA","voice":"alloy"}')
     assert_eq "$code" "200" "cuda tts returns 200" || { rm -f "$tmpfile"; return 1; }
     local size
     size=$(wc -c < "$tmpfile")
@@ -468,18 +422,14 @@ test_litellm_cuda_tts() {
     echo "OK: litellm_cuda_tts"
 }
 
-# ── CUDA STT via speaches-cuda (SPEACHES_CUDA=1) ─────────────────────────────
+# ── CUDA STT via talkies-cuda (TALKIES_CUDA=1) ────────────────────────────
 
 test_litellm_cuda_stt() {
-    if [ "${SPEACHES_CUDA:-}" != "1" ]; then
-        echo "OK: litellm_cuda_stt (skipped — SPEACHES_CUDA not enabled)"
+    if [ "${TALKIES_CUDA:-}" != "1" ]; then
+        echo "OK: litellm_cuda_stt (skipped — TALKIES_CUDA not enabled)"
         return 0
     fi
-    if [ "${SPEACHES:-}" != "1" ]; then
-        echo "OK: litellm_cuda_stt (skipped — SPEACHES not enabled, needed for TTS input)"
-        return 0
-    fi
-    # generate audio via cpu tts to feed into cuda stt
+    # generate input via the same container's CPU-fast Kokoro TTS
     local tts_file
     tts_file=$(mktemp /tmp/litellm_cuda_stt_XXXXXX.mp3)
     local code
@@ -487,14 +437,14 @@ test_litellm_cuda_stt() {
         -X POST "$BASE_URL/v1/audio/speech" \
         -H "Content-Type: application/json" \
         -H "$AUTH_HEADER" \
-        -d '{"model":"local-speaches-kokoro-tts","input":"hello transcription test","voice":"af_heart"}')
+        -d '{"model":"local-talkies-cuda-kokoro-tts","input":"hello transcription test","voice":"af_heart"}')
     assert_eq "$code" "200" "tts for cuda stt input returns 200" || { rm -f "$tts_file"; return 1; }
 
     local out
     out=$(curl -sf --max-time 120 \
         -X POST "$BASE_URL/v1/audio/transcriptions" \
         -H "$AUTH_HEADER" \
-        -F "model=local-speaches-cuda-whisper-distil-large-v3" \
+        -F "model=local-talkies-cuda-whisper-large-v3-turbo" \
         -F "file=@$tts_file")
     rm -f "$tts_file"
     assert_contains "$out" "text" "cuda stt response has text field" || return 1
