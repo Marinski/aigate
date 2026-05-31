@@ -387,7 +387,6 @@ External image: [`psyb0t/talkies`](https://github.com/psyb0t/docker-talkies) (pi
 | `TALKIES_MAX_UPLOAD_BYTES` / `TALKIES_CUDA_MAX_UPLOAD_BYTES` | `104857600` | Max audio upload size (bytes) |
 | `TALKIES_LOG_LEVEL` / `TALKIES_CUDA_LOG_LEVEL` | `INFO` | Log level |
 | `TALKIES_PRELOAD` / `TALKIES_CUDA_PRELOAD` | _empty_ | Comma-separated model_ids to load at boot |
-| `TALKIES_PREFETCH` / `TALKIES_CUDA_PREFETCH` | _empty_ | Comma-separated model_ids to HF-snapshot at boot (download only, don't load into memory) |
 | `TALKIES_VAD_CHUNK_THRESHOLD` / `TALKIES_CUDA_VAD_CHUNK_THRESHOLD` | `30` | Audio length (seconds) above which VAD chunking kicks in |
 | `TALKIES_VAD_MAX_SPEECH` / `TALKIES_CUDA_VAD_MAX_SPEECH` | `28` | Max chunk length fed to a single forward pass |
 | `TALKIES_MEM_LIMIT` / `TALKIES_CUDA_MEM_LIMIT` | `8g` / `12g` | Container memory limit |

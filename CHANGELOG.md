@@ -2,6 +2,41 @@
 
 All notable changes to this project are documented here.
 
+## [v3.1.0] — 2026-05-31
+
+Unified auth token + talkies network fix. Backwards compatible — existing `.env` files keep working unchanged.
+
+### New: `AIGATE_TOKEN` master auth
+
+Single bearer token now authenticates against every aigate-owned service. Set `AIGATE_TOKEN` in `.env` and it becomes the default for:
+
+- `LITELLM_MASTER_KEY` (LiteLLM `/v1/*`)
+- `CLAUDEBOX_API_TOKEN` (`/claudebox/*`)
+- `PIBOX_ZAI_API_TOKEN` (`/pibox-zai/*` + its MCP)
+- `PREDICTALOT_AUTH_TOKEN` (`/predictalot/*` + MCP, CPU + CUDA both)
+- `MCP_TOOLS_AUTH_TOKEN` (`/mcp/*`)
+- `STEALTHY_AUTO_BROWSE_AUTH_TOKEN` (`/stealthy-auto-browse/*`)
+- `TELETHON_AUTH_KEY` (`/telethon/*`)
+- `HYBRIDS3_MASTER_KEY` (S3 master)
+
+Per-service tokens still override when set explicitly (chain pattern: `${SERVICE_TOKEN:-${AIGATE_TOKEN:-<literal-fallback>}}`). Upstream provider credentials (Anthropic OAuth, z.ai, Groq, OpenAI, etc.) are untouched — they're not aigate auth.
+
+`mailbox` is not wired into this — its auth lives in the `MAILBOX_CONFIG` yaml file on the host, outside compose's interpolation scope.
+
+### Fix: talkies couldn't reach HuggingFace
+
+`talkies` / `talkies-cuda` were attached only to `aigate-internal` (which has `internal: true` → no upstream traffic). The talkies entrypoint prefetches enabled models from HuggingFace on boot — the DNS resolution failed and both containers crash-looped. Added `aigate-public` to both (matches the pattern already used by `ollama` / `ollama-cuda` / `sdcpp` / `sdcpp-cuda` / `predictalot` for the same reason).
+
+### Cleanup: dead `TALKIES_PREFETCH` env var
+
+`TALKIES_PREFETCH` / `TALKIES_CUDA_PREFETCH` were carried over from the old in-repo talkies design and never read by the upstream `psyb0t/talkies` image — the v0.5.0 entrypoint unconditionally prefetches all enabled models on boot (controlled by `TALKIES_ENABLED_MODELS`, not `_PREFETCH`). Stripped from `docker-compose.yml`, `.env.example`, and `docs/services-reference.md`. `TALKIES_PRELOAD` (lazy-load list read by the server at startup) is still honored and stays.
+
+### Files changed
+
+- `.env.example` — added `AIGATE_TOKEN` block in Core section; commented per-service tokens to mark them as overrides; dropped dead `TALKIES_PREFETCH` / `TALKIES_CUDA_PREFETCH` lines.
+- `docker-compose.yml` — chained per-service token defaults through `AIGATE_TOKEN`; added `aigate-public` to `talkies` + `talkies-cuda`; stripped dead `TALKIES_PREFETCH` env passthrough on both talkies services.
+- `docs/services-reference.md` — dropped the `TALKIES_PREFETCH` row from the tuning table.
+
 ## [v3.0.0] — 2026-05-29
 
 **Breaking: removed in-repo `talkies/`, `asr-canary/`, `vllm/`, and `qwen3-cuda-tts/` source trees. All transcription + TTS now goes through the external [`psyb0t/talkies`](https://github.com/psyb0t/docker-talkies) image (pinned to `v0.5.0` / `v0.5.0-cuda`). One container exposes both `POST /v1/audio/transcriptions` (whisper + canary + parakeet) and `POST /v1/audio/speech` (Kokoro-82M; Qwen3-TTS-0.6B voice cloning on CUDA).**

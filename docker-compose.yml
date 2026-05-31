@@ -79,6 +79,8 @@ services:
       PYTHONPATH: /app/callbacks
       # Disable telemetry
       LITELLM_TELEMETRY: "False"
+      # LITELLM_MASTER_KEY defaults to AIGATE_TOKEN — see .env.example "Core".
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-${AIGATE_TOKEN}}
       MISTRAL_API_KEY: ${MISTRAL_API_KEY:-}
       COHERE_API_KEY: ${COHERE_API_KEY:-}
       UI_USERNAME: ${LITELLM_USERNAME:-}
@@ -116,7 +118,7 @@ services:
     environment:
       CLAUDE_MODE_API: "1"
       CLAUDE_MODE_API_PORT: "8080"
-      CLAUDE_MODE_API_TOKEN: ${CLAUDEBOX_API_TOKEN:-lulz-4-security}
+      CLAUDE_MODE_API_TOKEN: ${CLAUDEBOX_API_TOKEN:-${AIGATE_TOKEN:-lulz-4-security}}
       CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
       ANTHROPIC_API_KEY: ${CLAUDEBOX_ANTHROPIC_API_KEY:-}
     volumes:
@@ -142,9 +144,9 @@ services:
     environment:
       PIBOX_API_MODE: "1"
       PIBOX_API_MODE_PORT: "8080"
-      PIBOX_API_MODE_TOKEN: ${PIBOX_ZAI_API_TOKEN:-lulz-4-security-zai}
+      PIBOX_API_MODE_TOKEN: ${PIBOX_ZAI_API_TOKEN:-${AIGATE_TOKEN:-lulz-4-security-zai}}
       PIBOX_MCP_MODE: "1"
-      PIBOX_MCP_MODE_TOKEN: ${PIBOX_ZAI_API_TOKEN:-lulz-4-security-zai}
+      PIBOX_MCP_MODE_TOKEN: ${PIBOX_ZAI_API_TOKEN:-${AIGATE_TOKEN:-lulz-4-security-zai}}
       PIBOX_AVAILABLE_MODELS: ${PIBOX_ZAI_AVAILABLE_MODELS:-glm-4.5-air,glm-4.7,glm-5.1}
       ANTHROPIC_API_KEY: ${PIBOX_ZAI_AUTH_TOKEN}
       ANTHROPIC_AUTH_TOKEN: ${PIBOX_ZAI_AUTH_TOKEN}
@@ -175,7 +177,7 @@ services:
     environment:
       PREDICTALOT_HOST: 0.0.0.0
       PREDICTALOT_PORT: "8080"
-      PREDICTALOT_AUTH_TOKENS: ${PREDICTALOT_AUTH_TOKEN:-lulz-4-security-predictalot}
+      PREDICTALOT_AUTH_TOKENS: ${PREDICTALOT_AUTH_TOKEN:-${AIGATE_TOKEN:-lulz-4-security-predictalot}}
       PREDICTALOT_DEVICE: ${PREDICTALOT_DEVICE:-auto}
       PREDICTALOT_MODEL_DIR: /models
       PREDICTALOT_PREFETCH: ${PREDICTALOT_PREFETCH:-}
@@ -208,7 +210,7 @@ services:
     environment:
       PREDICTALOT_HOST: 0.0.0.0
       PREDICTALOT_PORT: "8080"
-      PREDICTALOT_AUTH_TOKENS: ${PREDICTALOT_AUTH_TOKEN:-lulz-4-security-predictalot}
+      PREDICTALOT_AUTH_TOKENS: ${PREDICTALOT_AUTH_TOKEN:-${AIGATE_TOKEN:-lulz-4-security-predictalot}}
       PREDICTALOT_DEVICE: ${PREDICTALOT_DEVICE:-auto}
       PREDICTALOT_MODEL_DIR: /models
       PREDICTALOT_PREFETCH: ${PREDICTALOT_PREFETCH:-}
@@ -347,7 +349,7 @@ services:
     restart: unless-stopped
     environment:
       REDIS_URL: redis://:${STEALTHY_AUTO_BROWSE_REDIS_PASSWORD}@stealthy-auto-browse-redis:6379
-      AUTH_TOKEN: ${STEALTHY_AUTO_BROWSE_AUTH_TOKEN:-lulz-4-security}
+      AUTH_TOKEN: ${STEALTHY_AUTO_BROWSE_AUTH_TOKEN:-${AIGATE_TOKEN:-lulz-4-security}}
       NUM_REPLICAS: ${STEALTHY_AUTO_BROWSE_NUM_REPLICAS:-5}
     mem_limit: ${SAB_MEM_LIMIT:-256m}
     memswap_limit: ${SAB_MEMSWAP_LIMIT:-512m}
@@ -403,7 +405,6 @@ services:
       TALKIES_MAX_UPLOAD_BYTES: ${TALKIES_MAX_UPLOAD_BYTES:-104857600}
       TALKIES_LOG_LEVEL: ${TALKIES_LOG_LEVEL:-INFO}
       TALKIES_PRELOAD: ${TALKIES_PRELOAD:-}
-      TALKIES_PREFETCH: ${TALKIES_PREFETCH:-}
       TALKIES_VAD_CHUNK_THRESHOLD: ${TALKIES_VAD_CHUNK_THRESHOLD:-30}
       TALKIES_VAD_MAX_SPEECH: ${TALKIES_VAD_MAX_SPEECH:-28}
     volumes:
@@ -420,6 +421,7 @@ services:
       - no-new-privileges:true
     networks:
       - aigate-internal
+      - aigate-public
 
   # ── talkies CUDA (unified speech service — Whisper + Parakeet + all Canary
   # + Kokoro TTS + Qwen3-TTS voice cloning, NVIDIA GPU) ──────────────────────
@@ -445,7 +447,6 @@ services:
       TALKIES_MAX_UPLOAD_BYTES: ${TALKIES_CUDA_MAX_UPLOAD_BYTES:-104857600}
       TALKIES_LOG_LEVEL: ${TALKIES_CUDA_LOG_LEVEL:-INFO}
       TALKIES_PRELOAD: ${TALKIES_CUDA_PRELOAD:-}
-      TALKIES_PREFETCH: ${TALKIES_CUDA_PREFETCH:-}
       TALKIES_VAD_CHUNK_THRESHOLD: ${TALKIES_CUDA_VAD_CHUNK_THRESHOLD:-30}
       TALKIES_VAD_MAX_SPEECH: ${TALKIES_CUDA_VAD_MAX_SPEECH:-28}
     volumes:
@@ -471,6 +472,7 @@ services:
       - no-new-privileges:true
     networks:
       - aigate-internal
+      - aigate-public
 
   # ── Ollama (local inference) ─────────────────────────────────────────────────
 
@@ -716,11 +718,11 @@ services:
     cpus: ${MCP_CPUS:-0.5}
     environment:
       LITELLM_URL: http://litellm:4000
-      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-${AIGATE_TOKEN}}
       HF_TOKEN: ${HF_TOKEN:-}
       HYBRIDS3_UPLOAD_KEY: ${HYBRIDS3_UPLOADS_KEY:-}
       PUBLIC_BASE_URL: ${MCP_PUBLIC_BASE_URL:-https://aigate.51k.eu}
-      MCP_TOOLS_AUTH_TOKEN: ${MCP_TOOLS_AUTH_TOKEN:-lulz-4-security}
+      MCP_TOOLS_AUTH_TOKEN: ${MCP_TOOLS_AUTH_TOKEN:-${AIGATE_TOKEN:-lulz-4-security}}
       SEARXNG_URL: ${SEARXNG_URL:-http://searxng:8080}
     depends_on:
       litellm:
@@ -791,7 +793,7 @@ services:
       JWT_SECRET: ${LIBRECHAT_JWT_SECRET}
       JWT_REFRESH_SECRET: ${LIBRECHAT_JWT_SECRET}
       SEARCH: "false"
-      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-${AIGATE_TOKEN}}
       LIBRECHAT_TITLE_MODEL: ${LIBRECHAT_TITLE_MODEL:-groq-llama-3.3-70b}
       CONFIG_PATH: /app/librechat.yaml
     volumes:
@@ -869,7 +871,7 @@ services:
       TELETHON_API_ID: "${TELETHON_API_ID}"
       TELETHON_API_HASH: "${TELETHON_API_HASH}"
       TELETHON_SESSION: "${TELETHON_SESSION}"
-      TELETHON_AUTH_KEY: "${TELETHON_AUTH_KEY:-lulz-4-security}"
+      TELETHON_AUTH_KEY: "${TELETHON_AUTH_KEY:-${AIGATE_TOKEN:-lulz-4-security}}"
       TELETHON_LOG_LEVEL: "${TELETHON_LOG_LEVEL:-INFO}"
       TELETHON_REQUEST_TIMEOUT: "${TELETHON_REQUEST_TIMEOUT:-60}"
       TELETHON_FLOOD_SLEEP_THRESHOLD: "${TELETHON_FLOOD_SLEEP_THRESHOLD:-60}"
@@ -1315,7 +1317,7 @@ configs:
 
   hybrids3_config:
     content: |
-      master_key: "${HYBRIDS3_MASTER_KEY:-lulz-4-security}"
+      master_key: "${HYBRIDS3_MASTER_KEY:-${AIGATE_TOKEN:-lulz-4-security}}"
       master_public_key: "master"
       cleanup_interval: 1m
       lock_acquire_timeout: 30
