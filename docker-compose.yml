@@ -199,48 +199,6 @@ services:
       - aigate-internal
       - aigate-public
 
-  # predictalot CUDA — GPU variant
-  predictalot-cuda:
-    profiles: ["predictalot-cuda"]
-    image: psyb0t/predictalot:v0.2.1-cuda
-    restart: unless-stopped
-    mem_limit: ${PREDICTALOT_CUDA_MEM_LIMIT:-12g}
-    memswap_limit: ${PREDICTALOT_CUDA_MEMSWAP_LIMIT:-24g}
-    cpus: ${PREDICTALOT_CUDA_CPUS:-4.0}
-    environment:
-      PREDICTALOT_HOST: 0.0.0.0
-      PREDICTALOT_PORT: "8080"
-      PREDICTALOT_AUTH_TOKENS: ${PREDICTALOT_AUTH_TOKEN:-${AIGATE_TOKEN:-lulz-4-security-predictalot}}
-      PREDICTALOT_DEVICE: ${PREDICTALOT_DEVICE:-auto}
-      PREDICTALOT_MODEL_DIR: /models
-      PREDICTALOT_PREFETCH: ${PREDICTALOT_PREFETCH:-}
-      PREDICTALOT_PRELOAD: ${PREDICTALOT_PRELOAD:-}
-      PREDICTALOT_MODEL_IDLE_TIMEOUT: ${PREDICTALOT_MODEL_IDLE_TIMEOUT:-30m}
-      PREDICTALOT_MAX_BODY_SIZE: ${PREDICTALOT_MAX_BODY_SIZE:-32mb}
-      PREDICTALOT_LOG_LEVEL: ${PREDICTALOT_LOG_LEVEL:-INFO}
-    volumes:
-      - ${DATA_DIR_PREDICTALOT:-${DATA_DIR:-.data}/predictalot}/models:/models
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/healthz >/dev/null"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 60s
-    security_opt:
-      - no-new-privileges:true
-    networks:
-      aigate-internal:
-        aliases: [predictalot]
-      aigate-public:
-        aliases: [predictalot]
-
   hybrids3:
     profiles: ["hybrids3"]
     image: psyb0t/hybrids3:v0.1.0

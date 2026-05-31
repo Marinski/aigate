@@ -539,7 +539,7 @@ Telegram client at `/telethon/`. Backed by [docker-telethon-plus](https://github
 
 ---
 
-## predictalot (optional, `PREDICTALOT=1` or `PREDICTALOT_CUDA=1`)
+## predictalot (optional, `PREDICTALOT=1`)
 
 Foundation time-series forecasting at `/predictalot/`. Backed by [docker-predictalot](https://github.com/psyb0t/docker-predictalot) — five foundation models (`chronos-2`, `timesfm-2.5`, `moirai-2`, `toto-1`, `sundial-base-128m`) exposed via a **type-routed API**. Each forecast modality has its own URL prefix; a model only appears under a type if it implements that modality. Per-type weighted-mean ensembles parallelize across all type members.
 

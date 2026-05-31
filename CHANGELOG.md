@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented here.
 
+## [v3.2.0] — 2026-05-31
+
+Drop `predictalot-cuda` service. CPU is fast enough and the two variants shared the same network alias (`predictalot`), making simultaneous use broken by design. CPU-only keeps it simple.
+
+- `docker-compose.yml`: removed `predictalot-cuda` service block entirely.
+- `.env.example`: removed `PREDICTALOT_CUDA=` line.
+- `docs/services-reference.md`: updated section heading to drop CUDA mention.
+
 ## [v3.1.0] — 2026-05-31
 
 Unified auth token + talkies network fix. Backwards compatible — existing `.env` files keep working unchanged.
