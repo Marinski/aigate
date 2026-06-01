@@ -96,6 +96,10 @@ def active_providers(env):
         ("talkies-cuda",   lambda e: is_flag(e, "TALKIES_CUDA")),
         ("sdcpp",          lambda e: is_flag(e, "SDCPP")),
         ("sdcpp-cuda",     lambda e: is_flag(e, "SDCPP_CUDA")),
+        ("nvidia",         lambda e: is_flag(e, "NVIDIA")),
+        ("gemini",         lambda e: is_flag(e, "GEMINI")),
+        ("vllm-local",     lambda e: is_flag(e, "VLLM_LOCAL")),
+        ("embed-local",    lambda e: is_flag(e, "EMBED_LOCAL")),
     ]
     return [name for name, check in checks if check(env)]
 

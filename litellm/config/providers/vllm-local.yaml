@@ -1,0 +1,13 @@
+- model_name: local-vllm-gemma4
+  litellm_params:
+    model: gemma-4-31B-it-4bit-awq
+    api_base: os.environ/GEMMA_LOCAL_API_BASE
+    api_key: os.environ/LOCAL_VLLM_API_KEY
+    custom_llm_provider: openai
+
+- model_name: local-vllm-qwen3.6
+  litellm_params:
+    model: qwen-3.6-35b-a3b-awq-4bit
+    api_base: os.environ/QWEN_LOCAL_API_BASE
+    api_key: os.environ/LOCAL_VLLM_API_KEY
+    custom_llm_provider: openai

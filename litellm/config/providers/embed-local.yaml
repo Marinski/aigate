@@ -1,0 +1,8 @@
+- model_name: local-embed-nomic
+  litellm_params:
+    model: nomic-embed-text-v2
+    api_base: os.environ/EMBED_LOCAL_API_BASE
+    api_key: os.environ/LOCAL_VLLM_API_KEY
+    custom_llm_provider: openai
+  model_info:
+    mode: embedding

@@ -274,6 +274,52 @@ CUDA-accelerated image generation. Same Go wrapper with CUDA backend. Non-blocki
 
 ---
 
+## NVIDIA NIM API (paid — `NVIDIA=1`)
+
+NVIDIA NIM (NVIDIA Inference Microservices) hosts a wide range of open models on `api.nvidia.com`. Requires an API key from [build.nvidia.com](https://build.nvidia.com). Set `NVIDIA_API_BASE` to override the default endpoint.
+
+| Alias | Underlying model | Notes |
+| ----- | ---------------- | ----- |
+| `nvidia-kimi-k2` | moonshotai/kimi-k2-thinking | reasoning, thinking mode |
+| `nvidia-palmyra-fin-70b` | writer/palmyra-fin-70b-32k | finance-specialized (Writer) |
+| `nvidia-llama-3.2-90b` | meta/llama-3.2-90b-vision-instruct | multimodal, vision |
+| `nvidia-qwen3-80b` | qwen/qwen3-next-80b-a3b-instruct | MoE, fast, general |
+| `nvidia-qwen3-coder` | qwen/qwen3-coder-480b-a35b-instruct | code-specialized MoE |
+| `nvidia-deepseek-v3.2` | deepseek-ai/deepseek-v3.2 | reasoning |
+| `nvidia-nv-embedqa-e5-v5` | nvidia/nv-embedqa-e5-v5 | embeddings |
+
+## Google Gemini (paid — `GEMINI=1`)
+
+Google's Gemini models via the Gemini API. Requires an API key from [aistudio.google.com](https://aistudio.google.com).
+
+| Alias | Underlying model | Notes |
+| ----- | ---------------- | ----- |
+| `gemini-2.5-pro` | gemini/gemini-2.5-pro | flagship reasoning |
+| `gemini-2.5-flash` | gemini/gemini-2.5-flash | balanced speed/quality |
+| `gemini-2.5-flash-lite` | gemini/gemini-2.5-flash-lite | fast, cheap |
+| `gemini-3-flash-preview` | gemini/gemini-3-flash-preview | preview, latest gen |
+| `gemini-3.1-flash-lite-preview` | gemini/gemini-3.1-flash-lite-preview | preview lite |
+| `gemini-embedding-001` | gemini/gemini-embedding-001 | embeddings |
+
+## Local vLLM (external — `VLLM_LOCAL=1`)
+
+Existing Docker-based vLLM instances running on the host. Uses `custom_llm_provider: openai` pointing at the local vLLM API servers. Requires `LOCAL_VLLM_API_KEY`, `GEMMA_LOCAL_API_BASE`, and `QWEN_LOCAL_API_BASE` in `.env`.
+
+| Alias | Model | Port |
+| ----- | ----- | ---- |
+| `local-vllm-gemma4` | gemma-4-31B-it-4bit-awq | 8000 |
+| `local-vllm-qwen3.6` | qwen-3.6-35b-a3b-awq-4bit | 8001 |
+
+## Local Embedding (external — `EMBED_LOCAL=1`)
+
+External embedding server (Nomic Embed v2) running on the host at port 8010. Uses `custom_llm_provider: openai` with `mode: embedding`.
+
+| Alias | Model | Notes |
+| ----- | ----- | ----- |
+| `local-embed-nomic` | nomic-embed-text-v2 | text embeddings |
+
+---
+
 ## Fallbacks
 
 Every model has its own fallback chain. When a provider fails, is rate-limited, or returns an error, LiteLLM automatically tries the next model in the chain. Free providers are always tried first.

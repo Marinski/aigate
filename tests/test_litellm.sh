@@ -154,6 +154,46 @@ if [ "${TALKIES_CUDA:-}" = "1" ]; then
     )
 fi
 
+# NVIDIA NIM models — only expected when NVIDIA=1
+if [ "${NVIDIA:-}" = "1" ]; then
+    EXPECTED_MODELS+=(
+        "nvidia-kimi-k2"
+        "nvidia-palmyra-fin-70b"
+        "nvidia-llama-3.2-90b"
+        "nvidia-qwen3-80b"
+        "nvidia-qwen3-coder"
+        "nvidia-deepseek-v3.2"
+        "nvidia-nv-embedqa-e5-v5"
+    )
+fi
+
+# Gemini models — only expected when GEMINI=1
+if [ "${GEMINI:-}" = "1" ]; then
+    EXPECTED_MODELS+=(
+        "gemini-2.5-pro"
+        "gemini-2.5-flash"
+        "gemini-2.5-flash-lite"
+        "gemini-3-flash-preview"
+        "gemini-3.1-flash-lite-preview"
+        "gemini-embedding-001"
+    )
+fi
+
+# Local vLLM models — only expected when VLLM_LOCAL=1
+if [ "${VLLM_LOCAL:-}" = "1" ]; then
+    EXPECTED_MODELS+=(
+        "local-vllm-gemma4"
+        "local-vllm-qwen3.6"
+    )
+fi
+
+# Local embed model — only expected when EMBED_LOCAL=1
+if [ "${EMBED_LOCAL:-}" = "1" ]; then
+    EXPECTED_MODELS+=(
+        "local-embed-nomic"
+    )
+fi
+
 test_litellm_models_registered() {
     local models
     models=$(get "$BASE_URL/models")
