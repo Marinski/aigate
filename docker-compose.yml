@@ -201,7 +201,7 @@ services:
 
   hybrids3:
     profiles: ["hybrids3"]
-    image: psyb0t/hybrids3:v0.1.0
+    image: psyb0t/hybrids3:v0.2.0
     restart: unless-stopped
     mem_limit: ${HYBRIDS3_MEM_LIMIT:-256m}
     memswap_limit: ${HYBRIDS3_MEMSWAP_LIMIT:-512m}

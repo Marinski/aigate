@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here.
 
+## [v3.3.0] — 2026-06-03
+
+Bump hybrids3: v0.1.0 → v0.2.0. Adds presigned **PUT** URLs (existing presign endpoint now accepts `?method=PUT`). Backwards compatible — default is still GET.
+
+- `docker-compose.yml`: bump `psyb0t/hybrids3` → `v0.2.0`.
+- `docs/services-reference.md`: presign section documents the new `?method=PUT` query param and the boto3 `put_object` form. Notes that the method is bound into the SigV4 canonical request (GET-signed URLs can't PUT, vice versa), and that PUT on public buckets still requires a signed URL.
+
 ## [v3.2.0] — 2026-05-31
 
 Drop `predictalot-cuda` service. CPU is fast enough and the two variants shared the same network alias (`predictalot`), making simultaneous use broken by design. CPU-only keeps it simple.

@@ -187,19 +187,28 @@ The `uploads` bucket is configured as public-read — GET/LIST require no auth. 
 ### Presigned URLs
 
 ```bash
-# generate a presigned URL (expires in 1 hour by default, max 7 days)
+# generate a GET presigned URL (default; expires in 1 hour, max 7 days)
 curl -X POST "http://localhost:4000/storage/presign/uploads/photo.jpg?expires=3600" \
   -H "Authorization: Bearer $HYBRIDS3_UPLOADS_KEY"
 
-# response for public bucket — plain URL, no expiry
+# generate a PUT presigned URL — append ?method=PUT
+curl -X POST "http://localhost:4000/storage/presign/uploads/photo.jpg?method=PUT&expires=3600" \
+  -H "Authorization: Bearer $HYBRIDS3_UPLOADS_KEY"
+
+# response for public bucket (GET) — plain URL, no expiry
 {"url": "http://localhost:4000/storage/uploads/photo.jpg", "expires": null}
 
-# response for private bucket — signed URL with expiry
+# response for private bucket / PUT — signed URL with expiry
 {"url": "http://localhost:4000/storage/private/doc.pdf?X-Amz-Algorithm=...&X-Amz-Signature=...", "expires": 3600}
 
-# use the presigned URL — no auth header needed
+# use a GET presigned URL — no auth header needed
 curl "http://localhost:4000/storage/uploads/photo.jpg"
+
+# use a PUT presigned URL — upload directly, no auth header
+curl -X PUT --data-binary @photo.jpg "<presigned-put-url>"
 ```
+
+The signature binds the HTTP method into its canonical request — a GET-signed URL cannot be used to PUT, and vice versa. Public buckets still require a signed URL for PUT (anonymous writes are never allowed; anonymous reads still work).
 
 ### S3-compatible access (boto3)
 
@@ -221,9 +230,14 @@ s3.download_file("uploads", "image.png", "local.png")
 s3.list_objects_v2(Bucket="uploads", Prefix="images/")
 s3.delete_object(Bucket="uploads", Key="image.png")
 
-# generate presigned URL via boto3
-url = s3.generate_presigned_url(
+# generate presigned URLs via boto3 — GET or PUT
+get_url = s3.generate_presigned_url(
     "get_object",
+    Params={"Bucket": "uploads", "Key": "image.png"},
+    ExpiresIn=3600,
+)
+put_url = s3.generate_presigned_url(
+    "put_object",
     Params={"Bucket": "uploads", "Key": "image.png"},
     ExpiresIn=3600,
 )
