@@ -78,10 +78,40 @@ Two bugs surfaced while wiring audiolla and would have been silently breaking pr
 
 After these fixes, `/mcp/` aggregates the full set — including 81 audiolla tools and the 26 predictalot tools — under the expected `<server>-<tool>` namespaced names.
 
+### Restored: predictalot CUDA (side-by-side with CPU)
+
+Brings back the predictalot CUDA variant (dropped in v3.2.0 due to a shared-alias conflict) using the same side-by-side pattern as audiolla. CPU on `/predictalot/` (alias `predictalot`), CUDA on `/predictalot-cuda/` (alias `predictalot-cuda`). Both share `${DATA_DIR_PREDICTALOT}/models` so the second variant to boot reuses the first's HF snapshots. CUDA needs `nvidia-container-toolkit`.
+
+- `docker-compose.yml`: new `predictalot-cuda` service (profile `["predictalot-cuda"]`, image `psyb0t/predictalot:v0.2.1-cuda`, NVIDIA GPU reservation). Mounts `${DATA_DIR_PREDICTALOT}/models` so weights are shared with the CPU container. Nginx exposes both via parallel `location /predictalot/` and `location /predictalot-cuda/` blocks, each with its own `limit_req` zone (`predictalot` / `predictalot_cuda`) and `TIMEOUT_PREDICTALOT`-controlled proxy timeouts.
+- `litellm/config/mcp/predictalot-cuda.yaml`: new MCP fragment pointing at `http://predictalot-cuda:8080/mcp` with bearer auth. Description points back at the CPU fragment for the full per-tool list.
+- `litellm/build-config.py`: `predictalot` and `predictalot-cuda` are now two independent MCP registrations (gated on `PREDICTALOT=1` and `PREDICTALOT_CUDA=1` respectively) so the aggregator surfaces both as `predictalot-*` and `predictalot_cuda-*` tools when both variants are on.
+
+### Fix: MCP server YAML keys must follow SEP-986
+
+`litellm/config/mcp/audiolla-cuda.yaml` was shipped in v3.4.0 with the YAML key `audiolla-cuda:`. LiteLLM v1.80.18+ enforces SEP-986 on MCP server names — names cannot contain `-`. With both audiolla variants on, the proxy refused to start: `Exception: Server name cannot contain '-'. Use an alternative character instead Found: audiolla-cuda`. Renamed the inside-YAML keys to use underscores (`audiolla_cuda`, `predictalot_cuda`) while keeping the on-disk filenames with dashes so `build-config.py`'s `<server-name>.yaml` lookup still works. Tool prefixes in the aggregated `/mcp/` are now consistently `<server_with_underscores>-<tool>` as LiteLLM expected from the start.
+
+### Fix: predictalot MCP fragment was missing the same wiring audiolla got
+
+The audiolla v3.4.0 work fixed three things in its MCP fragment that the long-standing `litellm/config/mcp/predictalot.yaml` was silently missing too — so predictalot's MCP tools never actually surfaced in the aggregated `/mcp/`. This release backports the same fixes to `predictalot.yaml` (and applies them to the new `predictalot-cuda.yaml` from the start):
+
+- **Trailing slash on the URL.** FastMCP mounts the streamable-HTTP transport at `/mcp/` (with the slash) and returns 307 to `/mcp/` for the unsigned form. LiteLLM's MCP client doesn't follow that redirect — it just hangs and cancels. Both `predictalot.yaml` and `predictalot-cuda.yaml` now use `http://<host>:8080/mcp/`.
+- **`static_headers: Host: "127.0.0.1:8080"`.** Same DNS-rebinding-protection fix as audiolla — without the override LiteLLM sends `Host: predictalot[-cuda]:8080` and FastMCP returns 421.
+
+After both fixes, `/mcp/` cleanly surfaces 26 `predictalot-*` tools (and another 26 `predictalot_cuda-*` when both variants are on).
+
+### Fix: container healthchecks for predictalot / vllm / vllm-cuda
+
+- **predictalot** healthcheck used `wget`, which isn't in `psyb0t/predictalot:v0.2.1`. Switched to a `python3 -c` urllib probe (same pattern as audiolla in v3.4.0). Without this, the container always showed `unhealthy` even when `/healthz` returned 200.
+- **vllm** + **vllm-cuda** healthchecks used bare `python`, which isn't on the `vllm/vllm-openai*` base images (they have `python3` only). Switched both to `python3`. Same symptom — container running fine, healthcheck reporting `unhealthy`, which prevented `depends_on: condition: service_healthy` parents (nginx + litellm) from accepting them as dependencies.
+- `.env.example`: `PREDICTALOT_CUDA=` flag in Core; per-route `RATELIMIT_PREDICTALOT_CUDA[_BURST]` knobs.
+- `README.md`, `docs/services-reference.md`: side-by-side endpoint table and updated route diagram.
+- `tests/test_predictalot.sh`: parameterised helpers (route prefix + mcp namespace) — 8 CPU tests + 8 CUDA tests, each gated on its own flag.
+
 ### Other
 
 - `.gitignore`: added `.data/vllm/` + `.data/audiolla/` to the allowlist (with `.gitkeep`) so the empty bind-mount target dirs are tracked.
 - Empty `.gitkeep` files committed under both new data dirs.
+- `Makefile`: `down` target's `COMPOSE_PROFILES` list extended with `vllm`, `vllm-cuda`, `audiolla`, `audiolla-cuda` so `make down` (and `make restart`, which is `down + run-bg`) actually tears down the new services. `predictalot-cuda` was already in the list from before v3.2.0 (no change needed).
 
 ## [v3.3.0] — 2026-06-03
 

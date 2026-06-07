@@ -1,4 +1,4 @@
-audiolla-cuda:
+audiolla_cuda:
   url: "http://audiolla-cuda:8000/v1/mcp/"
   transport: "http"
   auth_type: "bearer_token"

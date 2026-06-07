@@ -177,8 +177,14 @@ services:
       - aigate-internal
       - aigate-public
 
-  # predictalot (foundation time-series forecasters) — direct /predictalot/* route
-  # + MCP at /predictalot/mcp. Not registered with LiteLLM (no chat/completion surface).
+  # predictalot (foundation time-series forecasters) — CPU + CUDA variants
+  # live side-by-side on distinct network aliases + nginx routes so both
+  # can run at once: CPU under `predictalot` at /predictalot/*, CUDA under
+  # `predictalot-cuda` at /predictalot-cuda/*. MCP endpoints follow the
+  # same split — /predictalot/mcp and /predictalot-cuda/mcp respectively.
+  # Not registered with LiteLLM (no chat/completion surface). Both share
+  # ${DATA_DIR_PREDICTALOT}/models so the second variant to boot reuses
+  # the first's HF snapshots.
   predictalot:
     profiles: ["predictalot"]
     image: psyb0t/predictalot:v0.2.1
@@ -200,11 +206,50 @@ services:
     volumes:
       - ${DATA_DIR_PREDICTALOT:-${DATA_DIR:-.data}/predictalot}/models:/models
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/healthz >/dev/null"]
+      test: ["CMD", "python3", "-c", "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/healthz',timeout=5).status==200 else 1)"]
       interval: 30s
       timeout: 10s
       retries: 5
       start_period: 60s
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - aigate-internal
+      - aigate-public
+
+  predictalot-cuda:
+    profiles: ["predictalot-cuda"]
+    image: psyb0t/predictalot:v0.2.1-cuda
+    restart: unless-stopped
+    mem_limit: ${PREDICTALOT_CUDA_MEM_LIMIT:-12g}
+    memswap_limit: ${PREDICTALOT_CUDA_MEMSWAP_LIMIT:-24g}
+    cpus: ${PREDICTALOT_CUDA_CPUS:-4.0}
+    environment:
+      PREDICTALOT_HOST: 0.0.0.0
+      PREDICTALOT_PORT: "8080"
+      PREDICTALOT_AUTH_TOKENS: ${PREDICTALOT_AUTH_TOKEN:-${AIGATE_TOKEN:-lulz-4-security-predictalot}}
+      PREDICTALOT_DEVICE: ${PREDICTALOT_CUDA_DEVICE:-auto}
+      PREDICTALOT_MODEL_DIR: /models
+      PREDICTALOT_PREFETCH: ${PREDICTALOT_PREFETCH:-}
+      PREDICTALOT_PRELOAD: ${PREDICTALOT_PRELOAD:-}
+      PREDICTALOT_MODEL_IDLE_TIMEOUT: ${PREDICTALOT_MODEL_IDLE_TIMEOUT:-30m}
+      PREDICTALOT_MAX_BODY_SIZE: ${PREDICTALOT_MAX_BODY_SIZE:-32mb}
+      PREDICTALOT_LOG_LEVEL: ${PREDICTALOT_LOG_LEVEL:-INFO}
+    volumes:
+      - ${DATA_DIR_PREDICTALOT:-${DATA_DIR:-.data}/predictalot}/models:/models
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/healthz',timeout=5).status==200 else 1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
     security_opt:
       - no-new-privileges:true
     networks:
@@ -525,7 +570,7 @@ services:
               count: all
               capabilities: [gpu]
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz')\""]
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz')\""]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -806,7 +851,7 @@ services:
       vllm-pull:
         condition: service_completed_successfully
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz')\""]
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz')\""]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -846,7 +891,7 @@ services:
               count: all
               capabilities: [gpu]
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz')\""]
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz')\""]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -1245,6 +1290,22 @@ configs:
               proxy_cache off;
           }
 
+          # predictalot-cuda — GPU sibling on its own route + alias
+          location /predictalot-cuda/ {
+              limit_req zone=predictalot_cuda burst=${RATELIMIT_PREDICTALOT_CUDA_BURST:-20} nodelay;
+              set $$upstream_predictalot_cuda http://predictalot-cuda:8080;
+              rewrite ^/predictalot-cuda/(.*) /$$1 break;
+              proxy_pass $$upstream_predictalot_cuda;
+              proxy_set_header Host $$http_host;
+              proxy_set_header X-Real-IP $$remote_addr;
+              proxy_set_header X-Forwarded-For $$proxy_add_x_forwarded_for;
+              proxy_set_header X-Forwarded-Proto $$scheme;
+              proxy_read_timeout ${TIMEOUT_PREDICTALOT:-24h};
+              proxy_send_timeout ${TIMEOUT_PREDICTALOT:-24h};
+              proxy_buffering off;
+              proxy_cache off;
+          }
+
           # audiolla — self-hosted audio-production API (direct route, not via LiteLLM)
           location /audiolla/ {
               limit_req zone=audiolla burst=${RATELIMIT_AUDIOLLA_BURST:-20} nodelay;
@@ -1489,6 +1550,7 @@ configs:
       limit_req_zone $$binary_remote_addr zone=searxng:10m rate=${RATELIMIT_SEARXNG:-60r/m};
       limit_req_zone $$binary_remote_addr zone=telethon:10m rate=${RATELIMIT_TELETHON:-30r/m};
       limit_req_zone $$binary_remote_addr zone=predictalot:10m rate=${RATELIMIT_PREDICTALOT:-60r/m};
+      limit_req_zone $$binary_remote_addr zone=predictalot_cuda:10m rate=${RATELIMIT_PREDICTALOT_CUDA:-60r/m};
       limit_req_zone $$binary_remote_addr zone=audiolla:10m rate=${RATELIMIT_AUDIOLLA:-30r/m};
       limit_req_zone $$binary_remote_addr zone=audiolla_cuda:10m rate=${RATELIMIT_AUDIOLLA_CUDA:-30r/m};
       limit_req_zone $$binary_remote_addr zone=mailbox:10m rate=${RATELIMIT_MAILBOX:-60r/m};

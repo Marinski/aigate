@@ -1,6 +1,12 @@
 predictalot:
-  url: "http://predictalot:8080/mcp"
+  url: "http://predictalot:8080/mcp/"
   transport: "http"
   auth_type: "bearer_token"
   auth_value: os.environ/PREDICTALOT_AUTH_TOKEN
+  # FastMCP's DNS-rebinding protection rejects requests whose Host header
+  # isn't in its allowlist (default: localhost / 127.0.0.1). Without this
+  # override LiteLLM sends Host: predictalot:8080 → 421 Misdirected Request
+  # and the aggregated /mcp/ never surfaces predictalot's tools.
+  static_headers:
+    Host: "127.0.0.1:8080"
   description: "Time-series forecasting via 5 foundation models (chronos-2, timesfm-2.5, moirai-2, toto-1, sundial-base-128m) across 6 forecast types. 26 tools total: forecast_<type>_<model> for each (type, model) cell, forecast_<type>_ensemble per type (weighted multi-model parallel), list_<type>_models per type. Types: univariate (all 5 models), multivariate (chronos-2/moirai-2/toto-1), covariates_past (chronos-2/moirai-2), covariates_future (chronos-2), covariates_both (chronos-2), samples / raw paths (toto-1/sundial-base-128m). Univariate / multivariate / covariate calls return quantiles; samples calls return raw sample paths. Slug normalization in tool names: dashes/dots → underscores (sundial-base-128m → sundial_base_128m, timesfm-2.5 → timesfm_2_5)."
