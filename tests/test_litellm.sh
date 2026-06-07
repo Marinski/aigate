@@ -154,6 +154,22 @@ if [ "${TALKIES_CUDA:-}" = "1" ]; then
     )
 fi
 
+# vllm CPU — text LLM + embedding wrapper (supervised vllm serve).
+if [ "${VLLM:-}" = "1" ]; then
+    EXPECTED_MODELS+=(
+        "local-vllm-nomic-embed-v2"
+        "local-vllm-qwen3-0.6b"
+    )
+fi
+
+# vllm-cuda — text LLM + embedding wrapper (supervised vllm serve, NVIDIA).
+if [ "${VLLM_CUDA:-}" = "1" ]; then
+    EXPECTED_MODELS+=(
+        "local-vllm-cuda-nomic-embed-v2"
+        "local-vllm-cuda-qwen3-0.6b"
+    )
+fi
+
 test_litellm_models_registered() {
     local models
     models=$(get "$BASE_URL/models")

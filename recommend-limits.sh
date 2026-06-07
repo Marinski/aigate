@@ -39,6 +39,7 @@ flag_talkies=0; flag_talkies_cuda=0
 flag_ollama=0; flag_ollama_cuda=0; flag_browser=0
 flag_claudebox=0; flag_cbzai=0; flag_hybrids3=0; flag_cloudflared=0
 flag_librechat=0; flag_mcp=0; flag_sdcpp=0; flag_sdcpp_cuda=0
+flag_vllm=0; flag_vllm_cuda=0; flag_audiolla=0; flag_audiolla_cuda=0
 
 if [ -f .env ]; then
     _v() { grep -E "^$1=" .env | cut -d= -f2 | tr -d '[:space:]' || true; }
@@ -56,6 +57,10 @@ if [ -f .env ]; then
     [ "$(_v LIBRECHAT)" = "1" ]     && flag_librechat=1
     [ "$(_v SDCPP)" = "1" ]         && flag_sdcpp=1
     [ "$(_v SDCPP_CUDA)" = "1" ]    && flag_sdcpp_cuda=1
+    [ "$(_v VLLM)" = "1" ]          && flag_vllm=1
+    [ "$(_v VLLM_CUDA)" = "1" ]     && flag_vllm_cuda=1
+    [ "$(_v AUDIOLLA)" = "1" ]      && flag_audiolla=1
+    [ "$(_v AUDIOLLA_CUDA)" = "1" ] && flag_audiolla_cuda=1
     # mcp auto-enabled when image/STT/TTS providers active
     [ "$(_v HUGGINGFACE)" = "1" ] || [ "$(_v OPENAI)" = "1" ] || \
         [ "$(_v TALKIES)" = "1" ] || [ "$(_v TALKIES_CUDA)" = "1" ] || \
@@ -86,7 +91,7 @@ echo "  RAM:   ${total_ram_mb} MB  (effective: ${effective_ram_mb} MB — ${os_r
 echo "  Swap:  ${total_swap_mb} MB  (effective: ${effective_swap_mb} MB at ${maxuse}%)"
 echo "  Cores: ${total_cores}  (effective: ${effective_cores} at ${maxuse}%)"
 echo "  MAXUSE: ${maxuse}%"
-echo "  Enabled: ollama=${flag_ollama} ollama_cuda=${flag_ollama_cuda} talkies=${flag_talkies} talkies_cuda=${flag_talkies_cuda} sdcpp=${flag_sdcpp} sdcpp_cuda=${flag_sdcpp_cuda} browser=${flag_browser} claudebox=${flag_claudebox} cbzai=${flag_cbzai} hybrids3=${flag_hybrids3} cloudflared=${flag_cloudflared} librechat=${flag_librechat} mcp=${flag_mcp}"
+echo "  Enabled: ollama=${flag_ollama} ollama_cuda=${flag_ollama_cuda} talkies=${flag_talkies} talkies_cuda=${flag_talkies_cuda} sdcpp=${flag_sdcpp} sdcpp_cuda=${flag_sdcpp_cuda} vllm=${flag_vllm} vllm_cuda=${flag_vllm_cuda} audiolla=${flag_audiolla} audiolla_cuda=${flag_audiolla_cuda} browser=${flag_browser} claudebox=${flag_claudebox} cbzai=${flag_cbzai} hybrids3=${flag_hybrids3} cloudflared=${flag_cloudflared} librechat=${flag_librechat} mcp=${flag_mcp}"
 echo ""
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

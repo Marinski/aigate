@@ -466,6 +466,26 @@ TTS models: `local-talkies-kokoro-tts` (Kokoro 82M, CPU, ~41 voices across en/es
 
 ---
 
+## Embeddings
+
+```bash
+# Local — Nomic Embed v2 (MoE) served by the vllm-cuda wrapper
+curl http://localhost:4000/v1/embeddings \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model": "local-vllm-cuda-nomic-embed-v2", "input": "The quick brown fox jumps over the lazy dog"}'
+
+# Batch — pass an array of strings
+curl http://localhost:4000/v1/embeddings \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model": "local-vllm-cuda-nomic-embed-v2", "input": ["doc 1", "doc 2", "doc 3"]}'
+```
+
+The vllm-cuda wrapper lazy-loads on the first request and unloads after `VLLM_CUDA_MODEL_TTL` (default 10 minutes) of idleness, so the first request after a cold start incurs the model-load cost (~10-30s). Subsequent requests are immediate until idle-eviction or until a competing CUDA service (`ollama-cuda`, `sdcpp-cuda`, `talkies-cuda`) needs the GPU. To add models, edit `vllm/models.json` (one slug per model, with `repo`, `vllm_args`, and a non-empty `endpoints` array).
+
+---
+
 ## LibreChat Web UI
 
 Enable with `LIBRECHAT=1` in `.env`. Access at `http://localhost:4000/librechat/`.
@@ -513,51 +533,45 @@ You can also hit the SearXNG UI directly at `http://localhost:4000/searxng/` for
 
 ## Time-series forecasting (predictalot)
 
-With `PREDICTALOT=1` (CPU) or `PREDICTALOT_CUDA=1` (GPU) the `/predictalot/` route exposes five foundation forecasters — `chronos-2`, `timesfm-2.5`, `moirai-2`, `toto-1`, `sundial-base-128m` — across a **type-routed API**. Each forecast modality has its own URL prefix, and a model only appears under a type if it implements that modality. Direct route, not registered as a LiteLLM provider. Bearer auth via `PREDICTALOT_AUTH_TOKEN`. Unauthenticated `/predictalot/healthz` for liveness.
+With `PREDICTALOT=1` the `/predictalot/` route exposes five foundation forecasters via a type-routed REST API + 26-tool MCP surface. Direct nginx route, bearer auth via `PREDICTALOT_AUTH_TOKEN`. MCP is aggregated into `/mcp/`.
 
-| Type | Base URL | Members |
-|---|---|---|
-| univariate (1D series → quantiles) | `/v1/univariate` | all five |
-| multivariate (channels per series) | `/v1/multivariate` | chronos-2, moirai-2, toto-1 |
-| covariates — past only | `/v1/covariates/past` | chronos-2, moirai-2 |
-| covariates — future only | `/v1/covariates/future` | chronos-2 |
-| covariates — past + future | `/v1/covariates` | chronos-2 |
-| samples (raw sample paths) | `/v1/samples` | toto-1, sundial-base-128m |
-
-Every base URL exposes the same three sub-paths: `<base>/forecast`, `<base>/forecast/ensemble`, `<base>/models`.
+Quick smoke test:
 
 ```bash
-# single-model univariate forecast — context is a list-of-series
 curl http://localhost:4000/predictalot/v1/univariate/forecast \
   -H "Authorization: Bearer $PREDICTALOT_AUTH_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{
-    "model": "chronos-2",
-    "context": [[10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]],
-    "config": {"horizon": 5}
-  }'
-
-# per-type ensemble — run every member in parallel, weighted mean + every individual forecast.
-# Weight 0 disables that model entirely. Omitted entry defaults to 1.
-curl http://localhost:4000/predictalot/v1/univariate/forecast/ensemble \
-  -H "Authorization: Bearer $PREDICTALOT_AUTH_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "context": [[10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]],
-    "config": {"horizon": 5},
-    "weights": {"chronos-2": 2.0, "moirai-2": 1.0, "timesfm-2.5": 0}
-  }'
-
-# per-type model listing (which slugs implement this type + load state)
-curl http://localhost:4000/predictalot/v1/univariate/models \
-  -H "Authorization: Bearer $PREDICTALOT_AUTH_TOKEN"
+  -d '{"model":"chronos-2","context":[[10,11,12,13,14,15,16,17,18,19,20]],"config":{"horizon":5}}'
 ```
 
-The response contains a median point forecast and per-quantile arrays (or, for `/v1/samples`, raw sample paths). Models lazy-load on first call (~50-800MB HuggingFace snapshot) and auto-unload after `PREDICTALOT_MODEL_IDLE_TIMEOUT` (default `30m`). Sundial runs in its own sidecar venv (`transformers==4.40.1` pin) and is transparent over the wire.
+Full API — every type, every model, every ensemble, MCP tool list, accuracy benchmarks: **[docker-predictalot README](https://github.com/psyb0t/docker-predictalot)**.
 
-The same surface is exposed as **26 MCP tools** — one per (type, model) cell (e.g. `predictalot-forecast_univariate_chronos_2`, `predictalot-forecast_multivariate_moirai_2`, `predictalot-forecast_samples_toto_1`) plus per-type ensembles (`predictalot-forecast_<type>_ensemble`) and per-type listings (`predictalot-list_<type>_models`). Model slug dashes/dots become underscores in tool names (`sundial-base-128m` → `sundial_base_128m`). Any function-calling model can run forecasts autonomously.
+---
 
-→ [predictalot service reference](services-reference.md#predictalot-optional-predictalot1-or-predictalot_cuda1) · [predictalot MCP tools](mcp-tools.md#predictalot--time-series-forecasting-predictalot1-or-predictalot_cuda1)
+## Audio production (audiolla)
+
+With `AUDIOLLA=1` (or `AUDIOLLA_CUDA=1` for GPU) the `/audiolla/` route exposes a self-hosted audio-production stack — stem separation, restoration, mastering, MIR analysis, DSP transforms, loudness, speech enhancement, diarization, MIDI transcription + composition. Curated YAML workflow presets and ad-hoc op-chain pipelines run server-side. Direct nginx route, bearer auth via `AUDIOLLA_AUTH_TOKEN`. MCP is aggregated into `/mcp/`.
+
+Quick smoke tests:
+
+```bash
+# stem-separate a track (4 stems) — returns base64 stems by default
+curl -X POST http://localhost:4000/audiolla/v1/audio/separate \
+  -H "Authorization: Bearer $AUDIOLLA_AUTH_TOKEN" \
+  -F "file=@song.wav" \
+  -F "engine=htdemucs"
+
+# detect chords + key
+curl -X POST http://localhost:4000/audiolla/v1/audio/chords \
+  -H "Authorization: Bearer $AUDIOLLA_AUTH_TOKEN" \
+  -F "file=@song.wav"
+
+# list all configured engines and their load state
+curl http://localhost:4000/audiolla/v1/engines \
+  -H "Authorization: Bearer $AUDIOLLA_AUTH_TOKEN"
+```
+
+Full API — every endpoint, every engine, presets, ad-hoc pipelines, async jobs, fetch policy, MCP tool list: **[docker-audiolla README](https://github.com/psyb0t/docker-audiolla)**.
 
 ---
 

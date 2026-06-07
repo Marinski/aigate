@@ -409,6 +409,55 @@ External image: [`psyb0t/talkies`](https://github.com/psyb0t/docker-talkies) (pi
 
 ---
 
+## vllm / vllm-cuda — local LLM + embeddings (optional, `VLLM=1` / `VLLM_CUDA=1`)
+
+Supervised wrapper around `vllm serve` that holds at most one model in memory at a time. Lazy-loads on first request for a given model_id, idle-unloads after `VLLM_*_MODEL_TTL`, and exposes the same `/api/ps` + `DELETE /api/ps/{model_id}` lifecycle surface as talkies so the LiteLLM resource_manager can swap models in/out of memory under contention.
+
+Both variants share the supervisor (`vllm/src/vllm_wrap/`), built from `vllm/` with `Dockerfile.cpu` (`vllm/vllm-openai-cpu` base) or `Dockerfile.cuda` (`vllm/vllm-openai:v0.21.0` base). Each ships its own model list:
+
+- `vllm/models.cpu.json` — CPU-tuned `vllm_args` (no `--gpu-memory-utilization`, smaller context for Qwen3 to bound KV cache RAM)
+- `vllm/models.cuda.json` — CUDA-tuned `vllm_args` (gpu memory split, larger context)
+
+Each entry maps a slug to `{repo, vllm_args, endpoints}`. Endpoints must be a subset of `{"chat", "completions", "embeddings"}`. Both variants share `${DATA_DIR_VLLM}/models/<org>/<repo>/` (populated once by `vllm-pull`) so enabling both does not duplicate downloads.
+
+| Endpoint                                  | URL (via litellm)                  | Auth                              |
+| ----------------------------------------- | ---------------------------------- | --------------------------------- |
+| Chat (OpenAI-compat)                      | `POST /v1/chat/completions`        | `Bearer $LITELLM_MASTER_KEY`      |
+| Completions (legacy OpenAI)               | `POST /v1/completions`             | `Bearer $LITELLM_MASTER_KEY`      |
+| Embeddings                                | `POST /v1/embeddings`              | `Bearer $LITELLM_MASTER_KEY`      |
+| Health (internal)                         | `GET vllm-cuda:8000/healthz`       | none                              |
+| Loaded models (internal)                  | `GET vllm-cuda:8000/api/ps`        | none                              |
+| Unload one (internal — resource_manager)  | `DELETE vllm-cuda:8000/api/ps/{id}`| none                              |
+| Unload all (internal)                     | `POST vllm-cuda:8000/unload`       | none                              |
+
+Default models:
+
+- `nomic-embed-v2` — `nomic-ai/nomic-embed-text-v2-moe` (MoE, 305M active, 8192 ctx, embeddings only)
+- `qwen3-0.6b` — `Qwen/Qwen3-0.6B` (chat + completions, 16384 ctx)
+
+LiteLLM aliases register per enabled variant:
+
+- `VLLM=1` → `local-vllm-nomic-embed-v2`, `local-vllm-qwen3-0.6b`
+- `VLLM_CUDA=1` → `local-vllm-cuda-nomic-embed-v2`, `local-vllm-cuda-qwen3-0.6b`
+
+Every tunable below has a CPU (`VLLM_*`) and CUDA (`VLLM_CUDA_*`) counterpart with the same meaning and default:
+
+| Tunable | Default | Notes |
+| ------- | ------- | ----- |
+| `VLLM_MODEL_TTL` / `VLLM_CUDA_MODEL_TTL` | `600` | Seconds idle before the subprocess is killed (`-1` disables) |
+| `VLLM_SWEEPER_INTERVAL` / `VLLM_CUDA_SWEEPER_INTERVAL` | `60` | How often the idle sweeper checks (seconds) |
+| `VLLM_LOAD_TIMEOUT` / `VLLM_CUDA_LOAD_TIMEOUT` | `600` | Max time to wait for `/health` after spawning `vllm serve` |
+| `VLLM_REQUEST_TIMEOUT` / `VLLM_CUDA_REQUEST_TIMEOUT` | `300` | Per-request proxy timeout |
+| `VLLM_LOG_LEVEL` / `VLLM_CUDA_LOG_LEVEL` | `INFO` | Wrapper log level |
+| `VLLM_PRELOAD` / `VLLM_CUDA_PRELOAD` | _empty_ | Pre-spawn this model_id at boot |
+| `VLLM_PREFETCH` / `VLLM_CUDA_PREFETCH` | _empty_ | Comma-separated model_ids the entrypoint should fetch on first start |
+| `VLLM_MEM_LIMIT` / `VLLM_CUDA_MEM_LIMIT` | `12g` | Container memory limit |
+| `VLLM_CPUS` / `VLLM_CUDA_CPUS` | `4.0` | Container CPU limit |
+| `VLLM_CPU_KVCACHE_SPACE` | `4` | CPU-only: GB of RAM reserved for the vllm KV cache |
+| `DATA_DIR_VLLM` | `${DATA_DIR}/vllm` | Bind-mount root for the wrapper's `/data` dir. Holds the flat HF-repo layout under `models/<org>/<repo>/<files>` (no blobs/snapshots dedup) — `vllm-pull` populates this via `huggingface-cli download <repo> --local-dir <path>`. Both CPU and CUDA wrappers, and any other service mounting the same dir, share the same files. |
+
+---
+
 ## MCP Tools — Media Generation (auto-enabled)
 
 Auto-enabled when any image or TTS provider is active (HuggingFace, OpenAI, Speaches, SDCPP, CUDA). Runs as an internal service — no direct nginx route, accessed only through LiteLLM's aggregated MCP endpoint at `/mcp/`.
@@ -555,82 +604,47 @@ Telegram client at `/telethon/`. Backed by [docker-telethon-plus](https://github
 
 ## predictalot (optional, `PREDICTALOT=1`)
 
-Foundation time-series forecasting at `/predictalot/`. Backed by [docker-predictalot](https://github.com/psyb0t/docker-predictalot) — five foundation models (`chronos-2`, `timesfm-2.5`, `moirai-2`, `toto-1`, `sundial-base-128m`) exposed via a **type-routed API**. Each forecast modality has its own URL prefix; a model only appears under a type if it implements that modality. Per-type weighted-mean ensembles parallelize across all type members.
+Foundation time-series forecasting (`chronos-2`, `timesfm-2.5`, `moirai-2`, `toto-1`, `sundial-base-128m`). Type-routed REST + MCP. Direct nginx route, not via LiteLLM. MCP is aggregated into `/mcp/`.
 
-Not registered with LiteLLM (no chat/completion surface) — accessed directly via nginx. MCP is exposed by default through LiteLLM's `/mcp/` aggregator with **26 tools** (one per (type, model) cell + per-type ensemble + per-type listing).
+| Endpoint        | URL                                  |
+| --------------- | ------------------------------------ |
+| REST            | `http://localhost:4000/predictalot/*` |
+| MCP (direct)    | `http://localhost:4000/predictalot/mcp` |
+| MCP (aggregated)| `http://localhost:4000/mcp/`         |
+| Health          | `http://localhost:4000/predictalot/healthz` |
 
-### Forecast types
+Auth: `Authorization: Bearer $PREDICTALOT_AUTH_TOKEN` (defaults to `AIGATE_TOKEN`).
 
-| Type | Base URL | Members | Request shape | Response shape |
-|---|---|---|---|---|
-| univariate | `/v1/univariate` | chronos-2, timesfm-2.5, moirai-2, toto-1, sundial-base-128m | `context: float[series][time]` | quantiles per series |
-| multivariate | `/v1/multivariate` | chronos-2, moirai-2, toto-1 | `context: float[series][channel][time]` | quantiles per (series, channel) |
-| covariates — past only | `/v1/covariates/past` | chronos-2, moirai-2 | univariate target + `pastCovariates` | quantiles per series |
-| covariates — future only | `/v1/covariates/future` | chronos-2 | univariate target + `futureCovariates` | quantiles per series |
-| covariates — past + future | `/v1/covariates` | chronos-2 | univariate target + both | quantiles per series |
-| samples | `/v1/samples` | toto-1, sundial-base-128m | univariate target + `numSamples` | raw sample paths |
+Full API — endpoints, request/response shapes, per-model quirks, accuracy benchmarks: **[docker-predictalot README](https://github.com/psyb0t/docker-predictalot)**.
 
-Every base URL exposes the same three sub-paths: `<base>/forecast`, `<base>/forecast/ensemble`, `<base>/models`.
+Env vars: `PREDICTALOT_AUTH_TOKEN`, `PREDICTALOT_DEVICE`, `PREDICTALOT_PREFETCH`, `PREDICTALOT_PRELOAD`, `PREDICTALOT_MODEL_IDLE_TIMEOUT`, `PREDICTALOT_MAX_BODY_SIZE`, `PREDICTALOT_LOG_LEVEL`, `DATA_DIR_PREDICTALOT`, `RATELIMIT_PREDICTALOT[_BURST]`, `TIMEOUT_PREDICTALOT`. Full reference in [`.env.example`](../.env.example).
 
-### Endpoints
+---
 
-| Endpoint                       | URL                                            | Auth         |
-| ------------------------------ | ---------------------------------------------- | ------------ |
-| Liveness probe                 | `GET  /predictalot/healthz`                    | none (open)  |
-| Per-type model listing         | `GET  /predictalot/v1/<type>/models`           | Bearer token |
-| Per-type single-model forecast | `POST /predictalot/v1/<type>/forecast`         | Bearer token |
-| Per-type weighted ensemble     | `POST /predictalot/v1/<type>/forecast/ensemble`| Bearer token |
-| MCP (direct)                   | `/predictalot/mcp`                             | Bearer token |
-| MCP (aggregated)               | `/mcp/` (via LiteLLM master key)               | Master key   |
+## audiolla (optional, `AUDIOLLA=1` / `AUDIOLLA_CUDA=1`)
 
-### Quick example
+Self-hosted **audio-production** REST + MCP API. Stem separation (Demucs / UVR), restoration (UVR de-reverb / de-echo / de-noise), mastering (matchering + pedalboard chains), MIR analysis (librosa: BPM, key, LUFS, beats, onsets, melody, chords, segments), DSP transforms (sox + ffmpeg), loudness normalization, speech enhancement (DeepFilterNet), VAD (silero), diarization (pyannote), CLAP embeddings + zero-shot classification, AudioSet tagging (AST), audio→MIDI (basic-pitch), MIDI compose / inspect / transform / render via fluidsynth.
 
-```bash
-curl -s http://localhost:4000/predictalot/v1/univariate/forecast \
-  -H "Authorization: Bearer $PREDICTALOT_AUTH_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "chronos-2",
-    "context": [[10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]],
-    "config": {"horizon": 5}
-  }' | jq
+Curated YAML workflow presets ship in-image (`master-for-spotify`, `podcast-cleanup`, `vocal-cleanup`). Ad-hoc op-chain pipelines run server-side — intermediates stay in memory between steps, no re-upload. Async jobs + webhooks for long-running work. Direct nginx route, not via LiteLLM. MCP is aggregated into `/mcp/`.
 
-# weighted ensemble — weight 0 disables a model, omitted entries default to 1
-curl -s http://localhost:4000/predictalot/v1/univariate/forecast/ensemble \
-  -H "Authorization: Bearer $PREDICTALOT_AUTH_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "context": [[10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]],
-    "config": {"horizon": 5},
-    "weights": {"chronos-2": 2.0, "moirai-2": 1.0, "timesfm-2.5": 0}
-  }' | jq
-```
+Audio output modes (per audio-producing tool): default base64, `output_path` (stages under `${DATA_DIR_AUDIOLLA}/files` for follow-up tools), `output_url` (PUT to a presigned URL).
 
-The ensemble response carries the weighted-mean forecast plus an `individual` map containing each contributing model's own forecast and applied weight, so dissent / post-processing is possible.
+CPU and CUDA variants run **side-by-side** on distinct routes and aliases — `/audiolla/` → CPU container, `/audiolla-cuda/` → GPU container. Enable independently via `AUDIOLLA=1` and/or `AUDIOLLA_CUDA=1`. CUDA needs `nvidia-container-toolkit` and is significantly faster on Demucs, UVR, pyannote, basic-pitch, DeepFilterNet, CLAP. Both share `${DATA_DIR_AUDIOLLA}` for the weight cache, so the second variant to boot reuses the first's downloads with zero re-fetch.
 
-Models lazy-load on first request (each downloads ~50-800MB into the mounted models dir, subsequent calls are fast). Idle models are unloaded after `PREDICTALOT_MODEL_IDLE_TIMEOUT` (default 30m). The Sundial model runs in its own sidecar venv (it pins `transformers==4.40.1` for upstream compatibility) — transparent over the wire.
+| Endpoint        | CPU (`AUDIOLLA=1`)                   | CUDA (`AUDIOLLA_CUDA=1`)                   |
+| --------------- | ------------------------------------ | ------------------------------------------ |
+| REST            | `http://localhost:4000/audiolla/*`   | `http://localhost:4000/audiolla-cuda/*`    |
+| MCP (direct)    | `http://localhost:4000/audiolla/v1/mcp` | `http://localhost:4000/audiolla-cuda/v1/mcp` |
+| MCP (aggregated)| `http://localhost:4000/mcp/` (`audiolla-*` prefix) | `http://localhost:4000/mcp/` (`audiolla_cuda-*` prefix) |
+| Health          | `http://localhost:4000/audiolla/healthz` | `http://localhost:4000/audiolla-cuda/healthz` |
+| Catalog         | `GET /audiolla/v1/catalog`           |
+| Engine lifecycle| `GET /audiolla/v1/ps`, `DELETE /audiolla/v1/ps/{engine}`, `POST /audiolla/v1/unload` |
 
-CPU and CUDA variants are mutually exclusive (both bind the `predictalot` network alias) — pick one. CUDA variant requires nvidia-container-toolkit + `--gpus` configuration on the host.
+Auth: `Authorization: Bearer $AUDIOLLA_AUTH_TOKEN` (defaults to `AIGATE_TOKEN`). Pyannote diarization additionally needs `HF_TOKEN` + the user accepting model terms at huggingface.co/pyannote/speaker-diarization-3.1.
 
-### Environment variables
+Full API — every endpoint, every request/response shape, all 50+ engines, presets, pipelines, MCP tool list, server-side URL fetch policy: **[docker-audiolla README](https://github.com/psyb0t/docker-audiolla)**.
 
-| Variable                          | Default                            | Description                                                 |
-| --------------------------------- | ---------------------------------- | ----------------------------------------------------------- |
-| `PREDICTALOT_AUTH_TOKEN`          | `lulz-4-security-predictalot`      | Bearer token for `/predictalot/*` + MCP                     |
-| `PREDICTALOT_DEVICE`              | `auto`                             | `auto` / `cpu` / `cuda` / `cuda:N`                          |
-| `PREDICTALOT_PREFETCH`            | —                                  | Comma-separated slugs (or `all`) to fetch weights at boot   |
-| `PREDICTALOT_PRELOAD`             | —                                  | Comma-separated slugs to load into memory at boot           |
-| `PREDICTALOT_MODEL_IDLE_TIMEOUT`  | `30m`                              | Idle time before a loaded model is unloaded (Go-style)      |
-| `PREDICTALOT_MAX_BODY_SIZE`       | `32mb`                             | Max request body                                            |
-| `PREDICTALOT_LOG_LEVEL`           | `INFO`                             | Python log level                                            |
-| `DATA_DIR_PREDICTALOT`            | `${DATA_DIR}/predictalot`          | Where HF snapshots are stored (~1.4GB for all five models)  |
-| `RATELIMIT_PREDICTALOT`           | `60r/m`                            | Nginx rate limit                                            |
-| `RATELIMIT_PREDICTALOT_BURST`     | `20`                               | Burst allowance                                             |
-| `TIMEOUT_PREDICTALOT`             | `600s`                             | Nginx proxy timeout (cold model loads can be slow)          |
-| `PREDICTALOT_MEM_LIMIT`           | `6g` (CPU) / `12g` (CUDA)          | Container memory limit                                      |
-| `PREDICTALOT_CPUS`                | `4.0`                              | CPU limit                                                   |
-
-See [docker-predictalot README](https://github.com/psyb0t/docker-predictalot) for full per-model quirks, request/response shapes, and accuracy benchmarks.
+Env vars: `AUDIOLLA_AUTH_TOKEN`, `AUDIOLLA_DEVICE`, `AUDIOLLA_ENABLED_ENGINES`, `AUDIOLLA_PRELOAD`, `AUDIOLLA_ENGINE_TTL`, `AUDIOLLA_SWEEPER_INTERVAL`, `AUDIOLLA_MAX_UPLOAD_BYTES`, `AUDIOLLA_FETCH_*` (server-side URL fetch policy), `AUDIOLLA_JOB_TTL`, `AUDIOLLA_JOB_MAX_CONCURRENT`, `DATA_DIR_AUDIOLLA`, `RATELIMIT_AUDIOLLA[_BURST]`, `TIMEOUT_AUDIOLLA`. Full reference in [`.env.example`](../.env.example).
 
 ---
 
@@ -786,6 +800,8 @@ Every local service unloads models after a period of inactivity:
 | sd.cpp CUDA | 5 minutes | `SDCPP_CUDA_IDLE_TIMEOUT` |
 | Speaches | On-demand unload | Resource manager triggers `DELETE /api/ps/{model}` |
 | Qwen3 CUDA TTS | On-demand unload | Resource manager triggers `POST /unload` |
+| vllm-cuda | 10 minutes | `VLLM_CUDA_MODEL_TTL` (wrapper idle sweeper); resource manager also triggers `DELETE /api/ps/{model}` |
+| vllm (CPU) | 10 minutes | `VLLM_MODEL_TTL` (wrapper idle sweeper); resource manager also triggers `DELETE /api/ps/{model}` |
 
 ### Auto-load on demand
 
@@ -816,6 +832,7 @@ Each service has its own unload API:
 | sd.cpp | `POST /sdcpp/v1/unload` |
 | Speaches | `DELETE /api/ps/{model_id}` |
 | Qwen3 CUDA TTS | `POST /unload` |
+| talkies / vllm-cuda | `DELETE /api/ps/{model_id}` (per model) or `POST /unload` (kill any loaded) |
 
 ### Non-blocking rejection
 

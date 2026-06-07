@@ -1,0 +1,14 @@
+audiolla-cuda:
+  url: "http://audiolla-cuda:8000/v1/mcp/"
+  transport: "http"
+  auth_type: "bearer_token"
+  auth_value: os.environ/AUDIOLLA_AUTH_TOKEN
+  # FastMCP's DNS-rebinding protection rejects requests whose Host header
+  # isn't in its allowlist (default: localhost / 127.0.0.1). Without this
+  # override, LiteLLM sends Host: audiolla-cuda:8000 (compose service name)
+  # and FastMCP returns 421 Misdirected Request. Spoofing Host: 127.0.0.1
+  # gets us past the check; the request is already inside aigate-internal
+  # so no actual rebinding risk.
+  static_headers:
+    Host: "127.0.0.1:8000"
+  description: "Self-hosted audio-production API (NVIDIA GPU variant of audiolla — faster Demucs / UVR / pyannote / basic-pitch / DeepFilterNet / CLAP). Same tool surface as the CPU `audiolla` MCP — see that fragment's description for the full per-tool list. Use this when you want a forced-GPU path; use `audiolla` when CPU is enough or no GPU is available. Both share ${DATA_DIR_AUDIOLLA} for model weights so they pull each others' cached files. Tools namespaced as `audiolla_cuda-<tool>` in the aggregated /mcp/. See github.com/psyb0t/docker-audiolla README for full per-tool params."

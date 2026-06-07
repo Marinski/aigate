@@ -1,0 +1,25 @@
+# vllm CUDA — text LLMs and embeddings served via supervised `vllm serve`.
+# Only one model is resident in VRAM at a time — the wrapper restarts
+# vllm-serve when switching. The LiteLLM resource_manager evicts vllm-cuda
+# whenever a competing CUDA job (ollama-cuda / sdcpp-cuda / talkies-cuda)
+# arrives.
+
+# ── Nomic Embed v2 (MoE, 305M active) ─────────────────────────────────────
+
+- model_name: local-vllm-cuda-nomic-embed-v2
+  litellm_params:
+    model: openai/nomic-embed-v2
+    api_base: http://vllm-cuda:8000/v1
+    api_key: none
+  model_info:
+    mode: embedding
+
+# ── Qwen3 0.6B (chat + completions) ───────────────────────────────────────
+
+- model_name: local-vllm-cuda-qwen3-0.6b
+  litellm_params:
+    model: openai/qwen3-0.6b
+    api_base: http://vllm-cuda:8000/v1
+    api_key: none
+  model_info:
+    mode: chat

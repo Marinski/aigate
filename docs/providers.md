@@ -272,6 +272,24 @@ CUDA-accelerated image generation. Same Go wrapper with CUDA backend. Non-blocki
 | `local-sdcpp-cuda-flux-schnell` | black-forest-labs/FLUX.1-schnell | best quality, largest (~7GB VRAM) |
 | `local-sdcpp-cuda-juggernaut-xi` | RunDiffusion/Juggernaut-XI-v11 | photorealistic SDXL fine-tune (~2.5GB VRAM) |
 
+## vLLM CPU (local — `VLLM=1`)
+
+Supervised single-model wrapper around `vllm serve` on top of the `vllm/vllm-openai-cpu` base image. Same surface as the CUDA variant — only one model resident at a time, idle-unloads after `VLLM_MODEL_TTL` (default 10m). Edit `vllm/models.cpu.json` to add models.
+
+| Alias | Model | Notes |
+| ----- | ----- | ----- |
+| `local-vllm-nomic-embed-v2` | nomic-ai/nomic-embed-text-v2-moe | embeddings, MoE 305M active, 8192 ctx |
+| `local-vllm-qwen3-0.6b` | Qwen/Qwen3-0.6B | chat / completions, 8192 ctx |
+
+## vLLM CUDA (local NVIDIA — `VLLM_CUDA=1`)
+
+Supervised single-model wrapper around `vllm serve` for chat/completions/embeddings. Only one model resident in VRAM at a time — the wrapper restarts the subprocess when a different model is requested. Idle-unloads after `VLLM_CUDA_MODEL_TTL` (default 10m). The LiteLLM resource_manager evicts vllm-cuda whenever a competing CUDA job (ollama / sdcpp / talkies) arrives. Add or change models by editing `vllm/models.cuda.json`. Both CPU and CUDA variants share the same `${DATA_DIR_VLLM}/models/` weight store.
+
+| Alias | Model | Notes |
+| ----- | ----- | ----- |
+| `local-vllm-cuda-nomic-embed-v2` | nomic-ai/nomic-embed-text-v2-moe | embeddings, MoE 305M active, 8192 ctx |
+| `local-vllm-cuda-qwen3-0.6b` | Qwen/Qwen3-0.6B | chat / completions, 16384 ctx |
+
 ---
 
 ## Fallbacks

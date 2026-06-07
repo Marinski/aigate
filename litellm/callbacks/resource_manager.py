@@ -12,11 +12,13 @@ Groups (CUDA):
   cuda-llm          : local-ollama-cuda-* models
   cuda-img          : local-sdcpp-cuda-* (sd.cpp image generation)
   cuda-stt-talkies  : local-talkies-cuda-*  (ASR + Kokoro TTS + Qwen3-TTS)
+  cuda-vllm         : local-vllm-cuda-*  (text LLMs + embeddings via vllm serve)
 
 Groups (CPU):
   cpu-llm           : local-ollama-cpu-* models   (unload frees RAM)
   cpu-img           : local-sdcpp-cpu-* (sd.cpp image generation)
   cpu-stt-talkies   : local-talkies-*
+  cpu-vllm          : local-vllm-*  (text LLMs + embeddings via vllm serve)
 
 Each group is unloaded before a request lands on a competing group (so
 qwen3-tts frees VRAM before talkies-cuda needs it, etc.). Within a service,
@@ -57,15 +59,22 @@ _CPU_IMG_PREFIX = "local-sdcpp-cpu-"
 _TALKIES_CUDA_PREFIX = "local-talkies-cuda-"
 _TALKIES_CPU_PREFIX = "local-talkies-"
 
+# vllm — supervised single-model vllm serve (text LLM + embeddings).
+# CUDA prefix must be checked before CPU (longer prefix wins).
+_VLLM_CUDA_PREFIX = "local-vllm-cuda-"
+_VLLM_CPU_PREFIX = "local-vllm-"
+
 _ALL_CUDA_GROUPS = {
     "cuda-llm",
     "cuda-img",
     "cuda-stt-talkies",
+    "cuda-vllm",
 }
 _ALL_CPU_GROUPS = {
     "cpu-llm",
     "cpu-img",
     "cpu-stt-talkies",
+    "cpu-vllm",
 }
 
 
@@ -83,6 +92,10 @@ def _get_group(model: str) -> Optional[str]:
         return "cuda-stt-talkies"
     if model.startswith(_TALKIES_CPU_PREFIX):
         return "cpu-stt-talkies"
+    if model.startswith(_VLLM_CUDA_PREFIX):
+        return "cuda-vllm"
+    if model.startswith(_VLLM_CPU_PREFIX):
+        return "cpu-vllm"
     return None
 
 
@@ -235,13 +248,43 @@ async def _unload_cpu_stt_talkies():
     )
 
 
+# vllm-cuda — supervised single-model wrapper. Same /api/ps surface as
+# talkies, so reuse _unload_via_api_ps. The wrapper enforces only-one-model
+# resident internally; this just nudges it to free VRAM when something else
+# needs CUDA. Model IDs must match the wrapper's models.json slugs.
+_VLLM_CUDA_URL = "http://vllm-cuda:8000"
+_VLLM_CPU_URL = "http://vllm:8000"
+_VLLM_MODELS = [
+    "nomic-embed-v2",
+    "qwen3-0.6b",
+]
+
+
+async def _unload_cuda_vllm():
+    """Unload CUDA vllm models to free VRAM."""
+    logger.warning("[resource_manager] unloading cuda-vllm models")
+    await _unload_via_api_ps(
+        _VLLM_CUDA_URL, "cuda-vllm", _VLLM_MODELS
+    )
+
+
+async def _unload_cpu_vllm():
+    """Unload CPU vllm models to free RAM."""
+    logger.warning("[resource_manager] unloading cpu-vllm models")
+    await _unload_via_api_ps(
+        _VLLM_CPU_URL, "cpu-vllm", _VLLM_MODELS
+    )
+
+
 _UNLOAD_FNS = {
     "cuda-llm": _unload_cuda_llm,
     "cuda-img": _unload_cuda_img,
     "cuda-stt-talkies": _unload_cuda_stt_talkies,
+    "cuda-vllm": _unload_cuda_vllm,
     "cpu-llm": _unload_cpu_llm,
     "cpu-img": _unload_cpu_img,
     "cpu-stt-talkies": _unload_cpu_stt_talkies,
+    "cpu-vllm": _unload_cpu_vllm,
 }
 
 # ---------------------------------------------------------------------------

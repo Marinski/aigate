@@ -2,6 +2,87 @@
 
 All notable changes to this project are documented here.
 
+## [v3.4.0] — 2026-06-07
+
+Two new services + several aigate-side MCP fixes that surfaced during the wiring.
+
+### New: in-repo vLLM wrapper (CPU + CUDA) — text LLMs and embeddings
+
+Bring back the in-repo vLLM wrapper (dropped in v3.0.0) — now generalized for **text LLM + embeddings** instead of audio-LLMs, and shipped in **both CPU and CUDA variants**. Each supervises a single `vllm serve` subprocess and exposes the same `/api/ps` + `DELETE /api/ps/{model_id}` surface as talkies, so the LiteLLM resource_manager evicts each (and is evicted by each) under VRAM/RAM contention.
+
+Variants:
+
+- `VLLM=1` → `vllm` service from `Dockerfile.cpu` (base: `vllm/vllm-openai-cpu`), CPU-tuned `models.cpu.json`, LiteLLM prefix `local-vllm-*`, resource_manager group `cpu-vllm`.
+- `VLLM_CUDA=1` → `vllm-cuda` service from `Dockerfile.cuda` (base: `vllm/vllm-openai:v0.21.0`), CUDA-tuned `models.cuda.json`, LiteLLM prefix `local-vllm-cuda-*`, resource_manager group `cuda-vllm`.
+- Both can be enabled simultaneously. They share `${DATA_DIR_VLLM}/models/<org>/<repo>/` (populated once by `vllm-pull`) so no duplicate downloads.
+
+Default models:
+
+- `nomic-embed-v2` — `nomic-ai/nomic-embed-text-v2-moe` (MoE, 305M active, embeddings, 8192 ctx)
+- `qwen3-0.6b` — `Qwen/Qwen3-0.6B` (chat + completions, 16384 ctx)
+
+Weights live under `${DATA_DIR_VLLM}/models/<org>/<repo>/<files>` in the flat HF-repo layout (no `blobs/`/`snapshots/` dedup). The pull container populates this via `huggingface-cli download <repo> --local-dir <path>` so other services that bind-mount the same dir can load the same files directly. The supervisor passes the local path to `vllm serve` (not the HF repo string) and the wrapper runs `HF_HUB_OFFLINE=1`.
+
+Endpoints proxied to the supervised subprocess: `/v1/chat/completions`, `/v1/completions`, `/v1/embeddings`. Audio-only endpoints (`/v1/audio/transcriptions`) are gone — talkies covers ASR.
+
+Add more models by editing `vllm/models.json`. Each entry maps a slug to `{repo, vllm_args, endpoints}`; endpoints must be a subset of `{"chat", "completions", "embeddings"}`.
+
+Files:
+
+- `vllm/` — restored from `909e29a` and generalized:
+  - `vllm/src/vllm_wrap/server.py` — dropped `/v1/audio/transcriptions`, dropped the multipart body rewriter (audio-only `verbose_json→json` normalization), added `/v1/embeddings` + `/v1/completions`. Single JSON-only proxy path.
+  - `vllm/src/vllm_wrap/config.py` — endpoint validator now allows `{"chat", "completions", "embeddings"}`; added `VLLM_WRAP_DEVICE` (`cpu`/`cuda`) and `VLLM_WRAP_MODELS_DIR` (default `${DATA_DIR}/models`).
+  - `vllm/src/vllm_wrap/supervisor.py` — resolves `repo` to a local path (`MODELS_DIR/<repo>`) and passes that to `vllm serve`; appends `--device <DEVICE>` when set.
+  - `vllm/models.cuda.json` — CUDA-tuned `vllm_args` (Nomic embed v2 + Qwen3-0.6B).
+  - `vllm/models.cpu.json` — CPU-tuned `vllm_args` (no `--gpu-memory-utilization`, smaller Qwen3 context).
+  - `vllm/Dockerfile.cuda` — base `vllm/vllm-openai:v0.21.0`, copies `models.cuda.json`.
+  - `vllm/Dockerfile.cpu` — base `vllm/vllm-openai-cpu:latest-x86_64`, copies `models.cpu.json`, sets `VLLM_WRAP_DEVICE=cpu`, `VLLM_CPU_KVCACHE_SPACE=4`.
+  - `vllm/pyproject.toml` — bumped to 0.2.0, dropped `python-multipart`, updated description/keywords.
+- `docker-compose.yml` — added `vllm` (CPU), `vllm-cuda`, and shared `vllm-pull` (profiles `[vllm, vllm-cuda]`). Pull container does `huggingface-cli download <repo> --local-dir /data/models/<repo>` for each model in the flat HF-repo layout (no blobs/snapshots dedup) so other services bind-mounting the same dir can reuse the weights.
+- `litellm/build-config.py` — registers `vllm` (when `VLLM=1`) and `vllm-cuda` (when `VLLM_CUDA=1`) in `active_providers`.
+- `litellm/config/providers/vllm.yaml` — CPU aliases `local-vllm-nomic-embed-v2` + `local-vllm-qwen3-0.6b`.
+- `litellm/config/providers/vllm-cuda.yaml` — CUDA aliases `local-vllm-cuda-nomic-embed-v2` + `local-vllm-cuda-qwen3-0.6b`.
+- `tests/test_vllm.sh` — wrapper introspection (`/healthz`, `/v1/models`, `/api/ps`, `POST /unload`, `DELETE /api/ps/{id}`) plus live LiteLLM-routed tests for chat + embeddings, parameterised on upstream host and alias so both CPU and CUDA variants are covered. Auto-picked up by `test.sh`; each test skips when its variant is disabled.
+- `litellm/callbacks/resource_manager.py` — added `cpu-vllm` (CPU prefix `local-vllm-`) and `cuda-vllm` (CUDA prefix `local-vllm-cuda-`) groups. Both use the existing `DELETE /api/ps/{model_id}` unload pattern.
+- `recommend-limits.sh` — tracks `VLLM=1` and `VLLM_CUDA=1`, shows both in the enabled-services line.
+- `.env.example` — `VLLM=`/`VLLM_CUDA=` flags in Core; `VLLM_*` and `VLLM_CUDA_*` tuning vars (MODEL_TTL, SWEEPER_INTERVAL, LOAD_TIMEOUT, REQUEST_TIMEOUT, LOG_LEVEL, PRELOAD, PREFETCH) plus `VLLM_CPU_KVCACHE_SPACE` and `DATA_DIR_VLLM`.
+- `tests/test_litellm.sh` — `EXPECTED_MODELS` extends with the CPU aliases when `VLLM=1` and the CUDA aliases when `VLLM_CUDA=1`.
+- `docs/providers.md`, `docs/services-reference.md`, `docs/usage.md`, `README.md` — document both services side-by-side, the shared model store, model list, endpoint surface, tuning vars, embeddings curl example, and resource_manager groups.
+
+### New: audiolla (CPU + CUDA) — self-hosted audio-production REST + MCP
+
+Adds **audiolla** at `/audiolla/` (upstream: [psyb0t/docker-audiolla](https://github.com/psyb0t/docker-audiolla) v0.23.1). Self-hosted **audio-production** stack: stem separation (Demucs / UVR), restoration (UVR de-reverb / de-echo / de-noise), mastering (matchering + pedalboard chains), MIR analysis (librosa), DSP transforms (sox + ffmpeg), loudness normalization, speech enhancement (DeepFilterNet), VAD (silero), diarization (pyannote), CLAP embeddings + zero-shot classification, AudioSet tagging (AST), audio→MIDI (basic-pitch), MIDI compose / inspect / transform / render via fluidsynth. Curated YAML workflow presets (`master-for-spotify`, `podcast-cleanup`, `vocal-cleanup`) and ad-hoc op-chain pipelines run server-side — intermediates stay in memory between steps. Async jobs + webhooks for long-running work.
+
+Audio output modes (per audio-producing tool): default base64, `output_path` (stages under `${DATA_DIR_AUDIOLLA}/files`), `output_url` (PUT to a presigned URL).
+
+Wired the same way as predictalot (direct nginx route, not via LiteLLM, MCP aggregated into `/mcp/`). CPU and CUDA variants run **side-by-side** on distinct routes and aliases — `/audiolla/` → CPU, `/audiolla-cuda/` → GPU. Enable independently via `AUDIOLLA=1` and/or `AUDIOLLA_CUDA=1`. CUDA needs `nvidia-container-toolkit` and is significantly faster on Demucs, UVR, pyannote, basic-pitch, DeepFilterNet, CLAP. Both share `${DATA_DIR_AUDIOLLA}` for the weight cache, so the second variant to boot reuses the first's downloads with zero re-fetch.
+
+Also trimmed the long predictalot endpoint matrix in the in-repo docs — the upstream README is now the canonical source of truth for both services.
+
+- `docker-compose.yml`: new `audiolla` service (profile `["audiolla"]`, image `psyb0t/audiolla:v0.23.1`) and `audiolla-cuda` (profile `["audiolla-cuda"]`, image `psyb0t/audiolla:v0.23.1-cuda`, NVIDIA GPU reservation). Each binds its own compose-service-name alias (`audiolla` vs `audiolla-cuda`). Both bind-mount `${DATA_DIR_AUDIOLLA}` to `/data`. `AUDIOLLA_AUTH_TOKEN` defaults to `AIGATE_TOKEN` (master-auth chain). Nginx exposes both via parallel `location /audiolla/` and `location /audiolla-cuda/` blocks, each with its own rate-limit zone (`audiolla` / `audiolla_cuda`), `client_max_body_size = AUDIOLLA_MAX_UPLOAD_BYTES`, and `TIMEOUT_AUDIOLLA`-controlled proxy timeouts.
+- `litellm/config/mcp/audiolla.yaml` + `litellm/config/mcp/audiolla-cuda.yaml`: two MCP fragments pointing at `http://audiolla:8000/v1/mcp/` and `http://audiolla-cuda:8000/v1/mcp/` respectively, each with bearer auth and a `static_headers: Host: "127.0.0.1:8000"` to satisfy FastMCP's DNS-rebinding-protection allowlist (Host header would otherwise be the compose service name and FastMCP returns 421). Description on the CPU fragment covers the full 80+ tool surface including workflow primitives (`list_presets`, `describe_preset`, `list_ops`, `run_preset`, `run_pipeline_tool`) and the three output modes; the CUDA fragment points back at the CPU description and clarifies it's the forced-GPU path.
+- `litellm/build-config.py`: registers `audiolla` in `active_mcp_servers` when `AUDIOLLA=1` and `audiolla-cuda` when `AUDIOLLA_CUDA=1` (independent flags so both surfaces can be aggregated simultaneously).
+- `recommend-limits.sh`: tracks both `AUDIOLLA=1` and `AUDIOLLA_CUDA=1`.
+- `.env.example`: `AUDIOLLA=` + `AUDIOLLA_CUDA=` flags in Core; `AUDIOLLA_*` tuning vars (auth, device, enabled engines, preload, engine TTL, sweeper, upload cap, server-side URL fetch policy, job TTL + concurrency); `DATA_DIR_AUDIOLLA`; per-route `RATELIMIT_AUDIOLLA[_BURST]` and `RATELIMIT_AUDIOLLA_CUDA[_BURST]`; shared `TIMEOUT_AUDIOLLA`.
+- `README.md`, `docs/services-reference.md`, `docs/usage.md`: minimal sections — what it is, where the endpoint lives, auth, a small smoke-test, and a link to the upstream README for the full API. Trimmed predictalot to the same minimal shape.
+- `tests/test_audiolla.sh`: parameterised helpers (route prefix + tag) run the full suite — open-healthz, unauthenticated-rejection on `/v1/engines`, engines listing (asserts `htdemucs` + `librosa-analyze`), `/v1/catalog` discovery, two live ops against `tests/.fixtures/audio.mp3` (`/v1/audio/info` ffprobe, `/v1/audio/analyze` librosa), and a direct `/v1/mcp/` `tools/list` assertion (≥ 20 tools, spot-checks `separate`/`analyze`/`chords`) — separately against `/audiolla/` (gated on `AUDIOLLA=1`) and `/audiolla-cuda/` (gated on `AUDIOLLA_CUDA=1`).
+- `.research_files/docker-audiolla/`: upstream repo clone (for reference; gitignored).
+
+### Fix: aigate-side MCP wiring made `/mcp/` actually aggregate downstream services
+
+Two bugs surfaced while wiring audiolla and would have been silently breaking predictalot for as long as `os.environ/` token references existed in the MCP fragments — `/mcp/` was missing every downstream-token-protected MCP server (predictalot, audiolla):
+
+- `os.environ/AUDIOLLA_AUTH_TOKEN` and `os.environ/PREDICTALOT_AUTH_TOKEN` in LiteLLM MCP fragments resolve against the **LiteLLM** container's environment, not the downstream service's. `.env` only carries `AIGATE_TOKEN` (the master), so LiteLLM was sending an empty bearer to each MCP server → 401 → LiteLLM `Task cancelled while listing tools from {server}`. Fixed by re-exporting the same `${X_AUTH_TOKEN:-${AIGATE_TOKEN:-fallback}}` chain in the `litellm:` env block for both `PREDICTALOT_AUTH_TOKEN` and `AUDIOLLA_AUTH_TOKEN`.
+- FastMCP's DNS-rebinding protection rejects requests whose `Host` header isn't in its allowlist (default `localhost` / `127.0.0.1`). LiteLLM was sending `Host: audiolla:8000` → 421 Misdirected Request → cancelled. Fixed in `litellm/config/mcp/audiolla.yaml` via `static_headers: Host: "127.0.0.1:8000"`. The request is already inside `aigate-internal` so there's no actual rebinding risk.
+- Bumped `LITELLM_MCP_TOOL_LISTING_TIMEOUT` (default 30s) → 120s, `LITELLM_MCP_CLIENT_TIMEOUT` → 120s in the `litellm:` env block. Audiolla's 81-tool listing is on the edge of the default; tighter caps were silently dropping it.
+
+After these fixes, `/mcp/` aggregates the full set — including 81 audiolla tools and the 26 predictalot tools — under the expected `<server>-<tool>` namespaced names.
+
+### Other
+
+- `.gitignore`: added `.data/vllm/` + `.data/audiolla/` to the allowlist (with `.gitkeep`) so the empty bind-mount target dirs are tracked.
+- Empty `.gitkeep` files committed under both new data dirs.
+
 ## [v3.3.0] — 2026-06-03
 
 Bump hybrids3: v0.1.0 → v0.2.0. Adds presigned **PUT** URLs (existing presign endpoint now accepts `?method=PUT`). Backwards compatible — default is still GET.

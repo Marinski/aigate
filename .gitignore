@@ -78,5 +78,9 @@ Thumbs.db
 !.data/tailscale/.gitkeep
 !.data/mailbox/
 !.data/mailbox/.gitkeep
+!.data/vllm/
+!.data/vllm/.gitkeep
+!.data/audiolla/
+!.data/audiolla/.gitkeep
 
 ANUSTIMES.md

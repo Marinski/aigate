@@ -96,6 +96,8 @@ def active_providers(env):
         ("talkies-cuda",   lambda e: is_flag(e, "TALKIES_CUDA")),
         ("sdcpp",          lambda e: is_flag(e, "SDCPP")),
         ("sdcpp-cuda",     lambda e: is_flag(e, "SDCPP_CUDA")),
+        ("vllm",           lambda e: is_flag(e, "VLLM")),
+        ("vllm-cuda",      lambda e: is_flag(e, "VLLM_CUDA")),
     ]
     return [name for name, check in checks if check(env)]
 
@@ -114,6 +116,8 @@ def active_mcp_servers(env):
         ("telethon",      lambda e: is_flag(e, "TELETHON")),
         ("mailbox",       lambda e: is_flag(e, "MAILBOX")),
         ("predictalot",   lambda e: is_flag(e, "PREDICTALOT") or is_flag(e, "PREDICTALOT_CUDA")),
+        ("audiolla",      lambda e: is_flag(e, "AUDIOLLA")),
+        ("audiolla-cuda", lambda e: is_flag(e, "AUDIOLLA_CUDA")),
         ("mcp",           lambda e: any(
             is_flag(e, f) for f in ("HUGGINGFACE", "OPENAI", "TALKIES", "TALKIES_CUDA", "SDCPP", "SDCPP_CUDA", "SEARXNG")
         )),

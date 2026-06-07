@@ -1,0 +1,21 @@
+{
+  "models": {
+    "nomic-embed-v2": {
+      "repo": "nomic-ai/nomic-embed-text-v2-moe",
+      "vllm_args": [
+        "--task", "embed",
+        "--trust-remote-code",
+        "--max-model-len", "8192"
+      ],
+      "endpoints": ["embeddings"]
+    },
+    "qwen3-0.6b": {
+      "repo": "Qwen/Qwen3-0.6B",
+      "vllm_args": [
+        "--enforce-eager",
+        "--max-model-len", "8192"
+      ],
+      "endpoints": ["chat", "completions"]
+    }
+  }
+}

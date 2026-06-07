@@ -1,0 +1,63 @@
+# syntax=docker/dockerfile:1.7
+#
+# CPU image — vLLM OpenAI CPU server base + our Python wrapper (FastAPI).
+#
+# Mirrors Dockerfile.cuda but uses the official CPU image so the wrapper
+# can run on hosts without an NVIDIA GPU. Same supervisor / lazy-load /
+# idle-TTL / /api/ps surface — only the underlying vllm backend differs.
+#
+# Note: vLLM CPU is slower than llama.cpp (used by ollama) for small models.
+# This service exists mainly for symmetry with the CUDA variant and for
+# environments where running the same wrapper interface on both classes of
+# hardware is the simpler operational choice.
+
+FROM vllm/vllm-openai-cpu:latest-x86_64 AS runtime
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    TZ=UTC \
+    VLLM_WRAP_HOST=0.0.0.0 \
+    VLLM_WRAP_PORT=8000 \
+    VLLM_WRAP_SUBPROCESS_PORT=18000 \
+    VLLM_WRAP_MODELS_FILE=/app/models.json \
+    VLLM_WRAP_DATA_DIR=/data \
+    VLLM_WRAP_DEVICE=cpu \
+    HF_HOME=/data/hf \
+    HF_HUB_OFFLINE=1 \
+    VLLM_CPU_KVCACHE_SPACE=4 \
+    DEBIAN_FRONTEND=noninteractive
+
+# vllm/vllm-openai-cpu's entrypoint runs as root and execs `vllm serve` directly.
+# We need our own entrypoint + a non-root user, so reset both.
+USER root
+
+RUN (userdel -r ubuntu 2>/dev/null || true) \
+    && useradd -u 1000 --create-home --shell /bin/bash vllmuser \
+    && mkdir -p /data \
+    && chown vllmuser:vllmuser /data
+
+# Wrapper deps (vllm itself ships in the base image).
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install \
+        "fastapi==0.136.1" \
+        "uvicorn==0.47.0" \
+        "pydantic==2.13.4" \
+        "httpx==0.28.1"
+
+WORKDIR /app
+
+COPY --chown=vllmuser:vllmuser src ./src
+COPY --chown=vllmuser:vllmuser pyproject.toml ./
+COPY --chown=vllmuser:vllmuser models.cpu.json /app/models.json
+COPY --chown=vllmuser:vllmuser entrypoint.sh /usr/local/bin/vllm-entrypoint
+RUN chmod +x /usr/local/bin/vllm-entrypoint \
+    && pip install -e /app
+
+USER vllmuser
+
+EXPOSE 8000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+    CMD python3 -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz').status==200 else 1)" || exit 1
+
+ENTRYPOINT ["/usr/local/bin/vllm-entrypoint"]

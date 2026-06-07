@@ -22,6 +22,7 @@ MCP tools across multiple servers. Any model with function calling can invoke th
 - **Telegram client** — Telethon at `/telethon/`. Send/read/edit/delete messages, list dialogs, forward, send files from URL, manage group membership. REST API + MCP tools.
 - **Email gateway** — mailbox at `/mailbox/`. Stateless IMAP+SMTP across N accounts from one YAML config — unified inbox, per-account list/search/CRUD, SMTP send. REST API + flat MCP tool set (`mailbox` parameter selects account).
 - **Time-series forecasting** — predictalot at `/predictalot/`. Five foundation forecasters (chronos-2, timesfm-2.5, moirai-2, toto-1, sundial-base-128m) across six forecast types (univariate, multivariate, past/future covariates, samples) with per-type weighted ensembles. REST API + 26 MCP tools. CPU or CUDA.
+- **Audio production** — audiolla at `/audiolla/`. Stem separation (Demucs / UVR), restoration (UVR de-reverb / de-echo / de-noise), mastering (matchering / pedalboard chains + curated presets like `master-for-spotify`, `podcast-cleanup`, `vocal-cleanup`), MIR analysis (BPM / key / LUFS / beats / onsets / melody / chords / segments), DSP transforms (sox + ffmpeg), loudness normalization, speech enhancement (DeepFilterNet), VAD (silero), diarization (pyannote), CLAP embeddings + zero-shot classification, AudioSet tagging (AST), audio→MIDI (basic-pitch), MIDI compose / inspect / transform / render via fluidsynth, ad-hoc op-chain pipelines, async jobs + webhooks. REST API + MCP tools.
 
 Ask a Groq model to research something and it opens a browser, reads pages, screenshots them, uploads to storage, and comes back with a summary and links. The model decides what tools to use and in what order.
 
@@ -60,6 +61,8 @@ nginx :4000                                          ┌────────
   ├─► /searxng/              → SearXNG (meta-search, SEARXNG=1)
   ├─► /telethon/             → Telethon (Telegram client, TELETHON=1)
   ├─► /predictalot/          → predictalot (time-series forecasting, PREDICTALOT=1 / PREDICTALOT_CUDA=1)
+  ├─► /audiolla/             → audiolla (audio-production REST + MCP, CPU, AUDIOLLA=1)
+  ├─► /audiolla-cuda/        → audiolla (audio-production REST + MCP, NVIDIA GPU, AUDIOLLA_CUDA=1)
   ├─► /mailbox/              → mailbox (IMAP+SMTP gateway, MAILBOX=1)
   └─► /                      → LiteLLM (sync)
                                   ├─ Groq               (free: 30 RPM, 1K-14.4K RPD per model, GROQ=1)
@@ -74,6 +77,8 @@ nginx :4000                                          ┌────────
                                   ├─ Talkies CUDA       (local, NVIDIA, full ASR + Kokoro + Qwen3-TTS voice cloning, TALKIES_CUDA=1)
                                   ├─ sd.cpp CPU         (local, image gen, SDCPP=1)
                                   ├─ sd.cpp CUDA        (local, image gen, SDCPP_CUDA=1)
+                                  ├─ vLLM CPU           (local, text LLM + embeddings, VLLM=1)
+                                  ├─ vLLM CUDA          (local, NVIDIA, text LLM + embeddings, VLLM_CUDA=1)
                                   ├─ claudebox          (flat-rate, CLAUDEBOX=1)
                                   ├─ pibox-zai          (flat-rate, PIBOX_ZAI=1)
                                   ├─ Anthropic          (pay-per-token, ANTHROPIC=1)
@@ -87,6 +92,7 @@ MCP servers (all optional):
   ├─ mcp_tools             — generate_image + generate_tts + search_web (auto-enabled with image/TTS/SearXNG)
   ├─ telethon              — Telegram send/read/edit messages, dialogs, files, group management (TELETHON=1)
   ├─ predictalot           — time-series forecasting via 5 foundation models × 6 type-routed endpoints + per-type ensemble (PREDICTALOT=1 / PREDICTALOT_CUDA=1)
+  ├─ audiolla              — audio-production: stem separation, restoration, mastering, MIR, DSP, loudness, speech enhancement, diarization, MIDI compose + render, workflow presets + ad-hoc pipelines (AUDIOLLA=1 / AUDIOLLA_CUDA=1)
   └─ mailbox               — IMAP+SMTP gateway: inbox, list/search/send across N accounts (MAILBOX=1)
 ```
 
@@ -110,6 +116,8 @@ Default writable locations:
 | `.data/cloudflared/`                         | cloudflared                  | Tunnel config and credentials (if using named tunnel)                                      |
 | `.data/tailscale/`                           | tailscale                    | Tailscale node state (machine key, DERP info) — auto-created on first run                  |
 | `.data/predictalot/models/`                  | predictalot, predictalot-cuda | Downloaded HuggingFace snapshots for the 5 forecasters (~1.4GB total)                     |
+| `.data/audiolla/`                            | audiolla, audiolla-cuda      | Demucs weights (~6GB) + UVR models + torch hub + staged files (bind-mounted as `/data`; CPU and CUDA variants share the same cache) |
+| `.data/vllm/models/<org>/<repo>/`            | vllm, vllm-cuda, vllm-pull   | Flat HF-repo layout (no blobs/snapshots dedup) — `vllm-pull` populates via `huggingface-cli download --local-dir`. Shared by CPU and CUDA wrappers and by any other service that mounts the same dir. Default: Nomic embed v2 + Qwen3-0.6B. |
 | `.data/mailbox/`                             | mailbox                      | Recommended host path for the mailbox YAML config (`config.yaml` — gitignored, holds plaintext IMAP/SMTP creds) |
 
 ## Services
@@ -131,11 +139,14 @@ Default writable locations:
 | **[talkies CUDA](https://github.com/psyb0t/docker-talkies)** _(optional, `TALKIES_CUDA=1`)_                    | CUDA-accelerated talkies (`psyb0t/talkies:v0.3.0-cuda`). Adds `parakeet-tdt-0.6b-v3`, `canary-1b-flash` (EN/DE/FR/ES + EN↔X translation), and `canary-qwen-2.5b` (hybrid SALM) on top of the CPU set. Kokoro TTS still runs on CPU even inside the CUDA image (fast enough that it doesn't need a GPU). Shares `.data/talkies/`. Requires `nvidia-container-toolkit`. |
 | **sd.cpp CPU** _(optional, `SDCPP=1`)_                                                                         | Local CPU image generation via [stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp). Go wrapper with OpenAI-compatible `/v1/images/generations` endpoint, model hot-swap, idle timeout auto-unload. Models: sd-turbo, sdxl-turbo. Models cached in `.data/sdcpp/models/`.                                                                                   |
 | **sd.cpp CUDA** _(optional, `SDCPP_CUDA=1`)_                                                                   | CUDA-accelerated image generation via stable-diffusion.cpp. Same wrapper as CPU with CUDA backend. Models: sd-turbo, sdxl-turbo, sdxl-lightning, flux-schnell, juggernaut-xi. Non-blocking — rejects concurrent requests with 503 instead of queuing (resource manager handles scheduling). Requires `nvidia-container-toolkit`.                                              |
+| **vllm CPU** _(optional, `VLLM=1`)_                                                                            | Supervised wrapper around `vllm serve` on top of `vllm/vllm-openai-cpu`. Same surface as the CUDA variant — OpenAI-compatible `/v1/chat/completions`, `/v1/completions`, `/v1/embeddings`, idle-unload after `VLLM_MODEL_TTL`. Ships Nomic Embed v2 + Qwen3-0.6B; edit `vllm/models.cpu.json` to add more. Slower than llama.cpp (what ollama uses) for small models — included mostly for symmetry with the CUDA variant. Participates in the LiteLLM resource_manager `cpu-vllm` group. |
+| **vllm CUDA** _(optional, `VLLM_CUDA=1`)_                                                                      | Supervised wrapper around `vllm serve` (FastAPI on top of `vllm/vllm-openai`). Holds at most one model in VRAM; lazy-loads on first request, idle-unloads after `VLLM_CUDA_MODEL_TTL` (default 10m). OpenAI-compatible `/v1/chat/completions`, `/v1/completions`, and `/v1/embeddings`. Ships Nomic Embed v2 (MoE 305M, embeddings) and Qwen3-0.6B (chat). `vllm-pull` downloads weights via `huggingface-cli download --local-dir` into a flat HF-repo layout (`models/<org>/<repo>/<files>`) shared with the CPU variant and any other service mounting the same dir. Edit `vllm/models.cuda.json` to add more. Participates in the LiteLLM resource_manager so it evicts (and gets evicted by) ollama-cuda / sdcpp-cuda / talkies-cuda under VRAM contention. Requires `nvidia-container-toolkit`. |
 | **MCP tools** _(auto-enabled)_                                                                                 | Media generation and web search MCP server. Exposes `generate_image`, `generate_tts`, and `search_web` tools to any model with function calling. Discovers available models dynamically from LiteLLM. Returns structured JSON with persistent URLs (uploaded to HybridS3) — no base64 blobs. Auto-enabled when any image, TTS, or SearXNG provider is active.                 |
 | **[LibreChat](https://github.com/danny-avila/LibreChat)** _(optional, `LIBRECHAT=1`)_                          | Web UI for LLM interaction at `/librechat/`. Pre-configured with all LiteLLM models and MCP tools. MongoDB-backed conversation storage. Email/password auth — first registered user becomes admin, then set `LIBRECHAT_ALLOW_REGISTRATION=false` and restart. WebSocket streaming. Configurable via `.env` (registration, rate limits, debug logging, JWT secrets).           |
 | **[SearXNG](https://github.com/searxng/searxng)** _(optional, `SEARXNG=1`)_                                    | Self-hosted meta-search engine at `/searxng/`. Aggregates Google, Bing, DuckDuckGo, Wikipedia. No API key needed — runs entirely locally. Also powers the MCP `search_web` tool so any function-calling model can search the web autonomously. Protected by nginx admin auth.                                                                                                 |
 | **[Telethon Plus](https://github.com/psyb0t/docker-telethon-plus)** _(optional, `TELETHON=1`)_                 | Telegram client at `/telethon/`. REST API and MCP server — send/read/edit/delete messages, list dialogs, forward messages, send files from URL, manage group membership. Requires a Telegram API ID/hash and a string session (see [my.telegram.org/apps](https://my.telegram.org/apps)). Bearer token auth.                                                                  |
-| **[predictalot](https://github.com/psyb0t/docker-predictalot)** _(optional, `PREDICTALOT=1` / `PREDICTALOT_CUDA=1`)_ | Foundation time-series forecasting at `/predictalot/`. Five foundation models (chronos-2, timesfm-2.5, moirai-2, toto-1, sundial-base-128m) routed across six forecast modalities (univariate, multivariate, covariates, samples) with per-type weighted ensembles. Direct route (not via LiteLLM); MCP enabled by default. Models lazy-load on first request and auto-unload when idle. CPU and CUDA variants — pick one. See [docs/services-reference.md](docs/services-reference.md#predictalot-optional-predictalot1-or-predictalot_cuda1) for the type matrix, endpoints, and the 26-tool MCP surface. |
+| **[predictalot](https://github.com/psyb0t/docker-predictalot)** _(optional, `PREDICTALOT=1`)_ | Foundation time-series forecasting at `/predictalot/`. REST + MCP. Direct route (not via LiteLLM). Models lazy-load on first request, auto-unload when idle. Full API in the [upstream README](https://github.com/psyb0t/docker-predictalot). |
+| **[audiolla](https://github.com/psyb0t/docker-audiolla)** _(optional, `AUDIOLLA=1` and/or `AUDIOLLA_CUDA=1`)_ | Self-hosted audio-production REST + MCP. Stem separation, restoration, mastering, MIR analysis, DSP transforms, loudness, speech enhancement, diarization, MIDI transcription + composition; curated YAML workflow presets + ad-hoc op-chain pipelines that run server-side (intermediates stay in memory). Audio output modes: default base64, `output_path` (stages under FILES_DIR for follow-up tools), `output_url` (PUT to a presigned URL). Async jobs + webhooks. Direct route (not via LiteLLM). Engines lazy-load + auto-unload. CPU and CUDA variants run side-by-side on distinct routes (`/audiolla/` and `/audiolla-cuda/`) and aliases, both sharing `.data/audiolla/`. CUDA needs `nvidia-container-toolkit`. Full API in the [upstream README](https://github.com/psyb0t/docker-audiolla). |
 | **[mailbox](https://github.com/psyb0t/docker-mailbox)** _(optional, `MAILBOX=1`)_                               | Stateless IMAP+SMTP gateway at `/mailbox/`. Drives N email accounts from a single YAML config — unified inbox, per-account list/search/CRUD, SMTP send. MCP enabled by default with a flat tool set (`mailbox` parameter selects account). Holds plaintext creds, so `MAILBOX_CONFIG` must point at a gitignored YAML on the host (template at `mailbox/config.example.yaml`). |
 | **cloudflared** _(optional, `CLOUDFLARED=1`)_                                                                  | Cloudflare Tunnel. Disabled by default — enable with `CLOUDFLARED=1` in `.env`. Runs a quick tunnel (random `*.trycloudflare.com` URL, no account) or a named tunnel (fixed domain, requires config file and credentials).                                                                                                                                                    |
 | **tailscale** _(optional, `TAILSCALE=1`)_                                                                      | Tailscale node running [`tailscale serve`](https://tailscale.com/kb/1242/tailscale-serve). Proxies to nginx on the tailnet only — no public exposure, no port forwarding. Set `TS_AUTHKEY` and `TS_HOSTNAME`, then access aigate at `https://<hostname>.<tailnet>.ts.net` from any tailnet-joined device.                                                                       |
@@ -287,6 +298,24 @@ Adds the heavier ASR models that need a GPU to be useful. Kokoro TTS still runs 
 | `local-sdcpp-cuda-juggernaut-xi`  | Juggernaut XI — photorealistic SDXL fine-tune (~2.5GB VRAM) |
 
 Models auto-download on first use and cache in `.data/sdcpp/models/`.
+
+### Local text LLM + embeddings (vllm, CPU — `VLLM=1`)
+
+Supervised single-model wrapper around `vllm serve` (CPU). Only one model resident in RAM at a time. Same wrapper and surface as the CUDA variant; just slower. Add more by editing `vllm/models.cpu.json`.
+
+| Model name                          | Description                                                       |
+| ----------------------------------- | ----------------------------------------------------------------- |
+| `local-vllm-nomic-embed-v2`         | Nomic Embed v2 (MoE, 305M active) — embeddings, 8192 ctx          |
+| `local-vllm-qwen3-0.6b`             | Qwen 3 0.6B — chat / completions, 8192 ctx                        |
+
+### Local text LLM + embeddings (vllm-cuda — `VLLM_CUDA=1`)
+
+Supervised single-model wrapper around `vllm serve` (NVIDIA). Only one model resident in VRAM at a time — the wrapper restarts the subprocess when a different model is requested. Add more by editing `vllm/models.cuda.json`. Both variants share the same `${DATA_DIR_VLLM}/models/` weight store.
+
+| Model name                              | Description                                                                |
+| --------------------------------------- | -------------------------------------------------------------------------- |
+| `local-vllm-cuda-nomic-embed-v2`        | Nomic Embed v2 (MoE, 305M active) — embeddings, 8192 ctx                  |
+| `local-vllm-cuda-qwen3-0.6b`            | Qwen 3 0.6B — chat / completions, 16384 ctx                                |
 
 → [Full provider and model list](docs/providers.md)
 

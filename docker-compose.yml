@@ -81,8 +81,20 @@ services:
       LITELLM_TELEMETRY: "False"
       # LITELLM_MASTER_KEY defaults to AIGATE_TOKEN — see .env.example "Core".
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-${AIGATE_TOKEN}}
+      # MCP aggregator timeouts. Defaults (30s tool-listing) are too tight for
+      # big MCP servers like audiolla (60+ tools); bump so /mcp/ actually
+      # aggregates instead of cancelling. Tune via .env if needed.
+      LITELLM_MCP_TOOL_LISTING_TIMEOUT: ${LITELLM_MCP_TOOL_LISTING_TIMEOUT:-120}
+      LITELLM_MCP_CLIENT_TIMEOUT: ${LITELLM_MCP_CLIENT_TIMEOUT:-120}
+      LITELLM_MCP_METADATA_TIMEOUT: ${LITELLM_MCP_METADATA_TIMEOUT:-30}
       MISTRAL_API_KEY: ${MISTRAL_API_KEY:-}
       COHERE_API_KEY: ${COHERE_API_KEY:-}
+      # MCP bearer tokens for downstream aigate-owned services. LiteLLM's MCP
+      # client resolves `os.environ/X` against THIS container's env, not the
+      # downstream service's, so the same AIGATE_TOKEN fallback chain has to
+      # be repeated here.
+      PREDICTALOT_AUTH_TOKEN: ${PREDICTALOT_AUTH_TOKEN:-${AIGATE_TOKEN:-lulz-4-security-predictalot}}
+      AUDIOLLA_AUTH_TOKEN: ${AUDIOLLA_AUTH_TOKEN:-${AIGATE_TOKEN:-lulz-4-security-audiolla}}
       UI_USERNAME: ${LITELLM_USERNAME:-}
       UI_PASSWORD: ${LITELLM_PASSWORD:-}
     depends_on:
@@ -193,6 +205,98 @@ services:
       timeout: 10s
       retries: 5
       start_period: 60s
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - aigate-internal
+      - aigate-public
+
+  # audiolla — self-hosted audio-production REST + MCP. Two variants live
+  # side-by-side on distinct network aliases + nginx routes so both can run
+  # at once if you want: CPU under `audiolla` at /audiolla/*, CUDA under
+  # `audiolla-cuda` at /audiolla-cuda/*. MCP endpoints follow the same
+  # split — /audiolla/v1/mcp and /audiolla-cuda/v1/mcp respectively. Not
+  # registered with LiteLLM (no chat/completion surface). They share
+  # ${DATA_DIR_AUDIOLLA} for the weight cache (Demucs / UVR / torch hub)
+  # so enabling both does not duplicate downloads.
+  # Upstream: github.com/psyb0t/docker-audiolla.
+  audiolla:
+    profiles: ["audiolla"]
+    image: psyb0t/audiolla:v0.23.1
+    restart: unless-stopped
+    mem_limit: ${AUDIOLLA_MEM_LIMIT:-8g}
+    memswap_limit: ${AUDIOLLA_MEMSWAP_LIMIT:-16g}
+    cpus: ${AUDIOLLA_CPUS:-4.0}
+    environment:
+      AUDIOLLA_AUTH_TOKEN: ${AUDIOLLA_AUTH_TOKEN:-${AIGATE_TOKEN:-lulz-4-security-audiolla}}
+      AUDIOLLA_DEVICE: ${AUDIOLLA_DEVICE:-auto}
+      AUDIOLLA_DATA_DIR: /data
+      AUDIOLLA_ENABLED_ENGINES: ${AUDIOLLA_ENABLED_ENGINES:-}
+      AUDIOLLA_PRELOAD: ${AUDIOLLA_PRELOAD:-}
+      AUDIOLLA_ENGINE_TTL: ${AUDIOLLA_ENGINE_TTL:-10m}
+      AUDIOLLA_SWEEPER_INTERVAL: ${AUDIOLLA_SWEEPER_INTERVAL:-60}
+      AUDIOLLA_MAX_UPLOAD_BYTES: ${AUDIOLLA_MAX_UPLOAD_BYTES:-209715200}
+      AUDIOLLA_FETCH_MODE: ${AUDIOLLA_FETCH_MODE:-disabled}
+      AUDIOLLA_FETCH_HOSTS: ${AUDIOLLA_FETCH_HOSTS:-}
+      AUDIOLLA_FETCH_SCHEMES: ${AUDIOLLA_FETCH_SCHEMES:-https}
+      AUDIOLLA_FETCH_ALLOW_PRIVATE: ${AUDIOLLA_FETCH_ALLOW_PRIVATE:-false}
+      AUDIOLLA_FETCH_TIMEOUT: ${AUDIOLLA_FETCH_TIMEOUT:-30}
+      AUDIOLLA_JOB_TTL: ${AUDIOLLA_JOB_TTL:-1h}
+      AUDIOLLA_JOB_MAX_CONCURRENT: ${AUDIOLLA_JOB_MAX_CONCURRENT:-8}
+      HUGGINGFACE_TOKEN: ${HF_TOKEN:-}
+    volumes:
+      - ${DATA_DIR_AUDIOLLA:-${DATA_DIR:-.data}/audiolla}:/data
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz',timeout=5).status==200 else 1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - aigate-internal
+      - aigate-public
+
+  audiolla-cuda:
+    profiles: ["audiolla-cuda"]
+    image: psyb0t/audiolla:v0.23.1-cuda
+    restart: unless-stopped
+    mem_limit: ${AUDIOLLA_CUDA_MEM_LIMIT:-12g}
+    memswap_limit: ${AUDIOLLA_CUDA_MEMSWAP_LIMIT:-24g}
+    cpus: ${AUDIOLLA_CUDA_CPUS:-4.0}
+    environment:
+      AUDIOLLA_AUTH_TOKEN: ${AUDIOLLA_AUTH_TOKEN:-${AIGATE_TOKEN:-lulz-4-security-audiolla}}
+      AUDIOLLA_DEVICE: ${AUDIOLLA_CUDA_DEVICE:-auto}
+      AUDIOLLA_DATA_DIR: /data
+      AUDIOLLA_ENABLED_ENGINES: ${AUDIOLLA_ENABLED_ENGINES:-}
+      AUDIOLLA_PRELOAD: ${AUDIOLLA_PRELOAD:-}
+      AUDIOLLA_ENGINE_TTL: ${AUDIOLLA_ENGINE_TTL:-10m}
+      AUDIOLLA_SWEEPER_INTERVAL: ${AUDIOLLA_SWEEPER_INTERVAL:-60}
+      AUDIOLLA_MAX_UPLOAD_BYTES: ${AUDIOLLA_MAX_UPLOAD_BYTES:-209715200}
+      AUDIOLLA_FETCH_MODE: ${AUDIOLLA_FETCH_MODE:-disabled}
+      AUDIOLLA_FETCH_HOSTS: ${AUDIOLLA_FETCH_HOSTS:-}
+      AUDIOLLA_FETCH_SCHEMES: ${AUDIOLLA_FETCH_SCHEMES:-https}
+      AUDIOLLA_FETCH_ALLOW_PRIVATE: ${AUDIOLLA_FETCH_ALLOW_PRIVATE:-false}
+      AUDIOLLA_FETCH_TIMEOUT: ${AUDIOLLA_FETCH_TIMEOUT:-30}
+      AUDIOLLA_JOB_TTL: ${AUDIOLLA_JOB_TTL:-1h}
+      AUDIOLLA_JOB_MAX_CONCURRENT: ${AUDIOLLA_JOB_MAX_CONCURRENT:-8}
+      HUGGINGFACE_TOKEN: ${HF_TOKEN:-}
+    volumes:
+      - ${DATA_DIR_AUDIOLLA:-${DATA_DIR:-.data}/audiolla}:/data
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz',timeout=5).status==200 else 1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
     security_opt:
       - no-new-privileges:true
     networks:
@@ -665,6 +769,124 @@ services:
     networks:
       - aigate-public
 
+  # ── vllm + vllm-cuda (LLM + embedding wrapper, CPU or NVIDIA GPU) ─────────
+  #
+  # Supervises a single `vllm serve` subprocess. Lazy-loads on first request
+  # for a given model_id, idle-unloads after VLLM_*_MODEL_TTL (default 10m),
+  # and exposes the same /api/ps + DELETE /api/ps/{model_id} surface as
+  # talkies/ollama so the LiteLLM resource_manager can swap models in/out of
+  # memory under contention.
+  #
+  # Both variants share `${DATA_DIR_VLLM}/models/<org>/<repo>/` (flat HF-repo
+  # layout, no blobs/snapshots dedup) via `vllm-pull`, so enabling both does
+  # not duplicate downloads. Each ships its own models.<device>.json with
+  # device-tuned vllm_args.
+
+  vllm:
+    profiles: ["vllm"]
+    build:
+      context: ./vllm
+      dockerfile: Dockerfile.cpu
+    restart: unless-stopped
+    mem_limit: ${VLLM_MEM_LIMIT:-12g}
+    memswap_limit: ${VLLM_MEMSWAP_LIMIT:-24g}
+    cpus: ${VLLM_CPUS:-4.0}
+    environment:
+      VLLM_WRAP_MODEL_TTL: ${VLLM_MODEL_TTL:-600}
+      VLLM_WRAP_SWEEPER_INTERVAL: ${VLLM_SWEEPER_INTERVAL:-60}
+      VLLM_WRAP_LOAD_TIMEOUT: ${VLLM_LOAD_TIMEOUT:-600}
+      VLLM_WRAP_REQUEST_TIMEOUT: ${VLLM_REQUEST_TIMEOUT:-300}
+      VLLM_WRAP_LOG_LEVEL: ${VLLM_LOG_LEVEL:-INFO}
+      VLLM_WRAP_PRELOAD: ${VLLM_PRELOAD:-}
+      VLLM_WRAP_PREFETCH: ${VLLM_PREFETCH:-}
+      VLLM_CPU_KVCACHE_SPACE: ${VLLM_CPU_KVCACHE_SPACE:-4}
+    volumes:
+      - ${DATA_DIR_VLLM:-${DATA_DIR:-.data}/vllm}:/data
+    depends_on:
+      vllm-pull:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz')\""]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - aigate-internal
+
+  vllm-cuda:
+    profiles: ["vllm-cuda"]
+    build:
+      context: ./vllm
+      dockerfile: Dockerfile.cuda
+    restart: unless-stopped
+    mem_limit: ${VLLM_CUDA_MEM_LIMIT:-12g}
+    memswap_limit: ${VLLM_CUDA_MEMSWAP_LIMIT:-24g}
+    cpus: ${VLLM_CUDA_CPUS:-4.0}
+    environment:
+      VLLM_WRAP_MODEL_TTL: ${VLLM_CUDA_MODEL_TTL:-600}
+      VLLM_WRAP_SWEEPER_INTERVAL: ${VLLM_CUDA_SWEEPER_INTERVAL:-60}
+      VLLM_WRAP_LOAD_TIMEOUT: ${VLLM_CUDA_LOAD_TIMEOUT:-600}
+      VLLM_WRAP_REQUEST_TIMEOUT: ${VLLM_CUDA_REQUEST_TIMEOUT:-300}
+      VLLM_WRAP_LOG_LEVEL: ${VLLM_CUDA_LOG_LEVEL:-INFO}
+      VLLM_WRAP_PRELOAD: ${VLLM_CUDA_PRELOAD:-}
+      VLLM_WRAP_PREFETCH: ${VLLM_CUDA_PREFETCH:-}
+    volumes:
+      - ${DATA_DIR_VLLM:-${DATA_DIR:-.data}/vllm}:/data
+    depends_on:
+      vllm-pull:
+        condition: service_completed_successfully
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz')\""]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - aigate-internal
+
+  vllm-pull:
+    profiles: ["vllm", "vllm-cuda"]
+    image: python:3.12-slim-bookworm@sha256:d193c6f51a7dbd10395d6328de3a7edb0516fb0608ca138036576f574c3e07d2
+    restart: "no"
+    mem_limit: ${VLLM_PULL_MEM_LIMIT:-4g}
+    memswap_limit: ${VLLM_PULL_MEMSWAP_LIMIT:-8g}
+    cpus: ${VLLM_PULL_CPUS:-2.0}
+    environment:
+      HF_HOME: /data/hf
+      HF_TOKEN: ${HF_TOKEN:-}
+    entrypoint:
+      - sh
+      - -c
+      - |
+        set -eu
+        pip install --quiet --no-cache-dir "huggingface-hub==0.35.3"
+        # Flat HF-repo layout under /data/models/<repo> (no blobs/snapshots
+        # dedup) so other containers can mount the same dir and load weights
+        # directly. --local-dir copies real files, not symlinks.
+        for repo in nomic-ai/nomic-embed-text-v2-moe Qwen/Qwen3-0.6B; do
+            dest="/data/models/$$repo"
+            mkdir -p "$$dest"
+            echo "[pull] $$repo -> $$dest"
+            huggingface-cli download --max-workers 1 \
+                --local-dir "$$dest" "$$repo"
+        done
+    volumes:
+      - ${DATA_DIR_VLLM:-${DATA_DIR:-.data}/vllm}:/data
+    networks:
+      - aigate-public
+
   # ── MCP tools (image generation + TTS, extensible) ─────────────────────────
 
   mcp:
@@ -1023,6 +1245,40 @@ configs:
               proxy_cache off;
           }
 
+          # audiolla — self-hosted audio-production API (direct route, not via LiteLLM)
+          location /audiolla/ {
+              limit_req zone=audiolla burst=${RATELIMIT_AUDIOLLA_BURST:-20} nodelay;
+              client_max_body_size ${AUDIOLLA_MAX_UPLOAD_BYTES:-209715200};
+              set $$upstream_audiolla http://audiolla:8000;
+              rewrite ^/audiolla/(.*) /$$1 break;
+              proxy_pass $$upstream_audiolla;
+              proxy_set_header Host $$http_host;
+              proxy_set_header X-Real-IP $$remote_addr;
+              proxy_set_header X-Forwarded-For $$proxy_add_x_forwarded_for;
+              proxy_set_header X-Forwarded-Proto $$scheme;
+              proxy_read_timeout ${TIMEOUT_AUDIOLLA:-24h};
+              proxy_send_timeout ${TIMEOUT_AUDIOLLA:-24h};
+              proxy_buffering off;
+              proxy_cache off;
+          }
+
+          # audiolla-cuda — GPU sibling on its own route + alias
+          location /audiolla-cuda/ {
+              limit_req zone=audiolla_cuda burst=${RATELIMIT_AUDIOLLA_CUDA_BURST:-20} nodelay;
+              client_max_body_size ${AUDIOLLA_MAX_UPLOAD_BYTES:-209715200};
+              set $$upstream_audiolla_cuda http://audiolla-cuda:8000;
+              rewrite ^/audiolla-cuda/(.*) /$$1 break;
+              proxy_pass $$upstream_audiolla_cuda;
+              proxy_set_header Host $$http_host;
+              proxy_set_header X-Real-IP $$remote_addr;
+              proxy_set_header X-Forwarded-For $$proxy_add_x_forwarded_for;
+              proxy_set_header X-Forwarded-Proto $$scheme;
+              proxy_read_timeout ${TIMEOUT_AUDIOLLA:-24h};
+              proxy_send_timeout ${TIMEOUT_AUDIOLLA:-24h};
+              proxy_buffering off;
+              proxy_cache off;
+          }
+
           # stealthy-auto-browse cluster — HAProxy → browser replicas
           location /stealthy-auto-browse/ {
               limit_req zone=browser burst=${RATELIMIT_BROWSER_BURST:-10} nodelay;
@@ -1233,6 +1489,8 @@ configs:
       limit_req_zone $$binary_remote_addr zone=searxng:10m rate=${RATELIMIT_SEARXNG:-60r/m};
       limit_req_zone $$binary_remote_addr zone=telethon:10m rate=${RATELIMIT_TELETHON:-30r/m};
       limit_req_zone $$binary_remote_addr zone=predictalot:10m rate=${RATELIMIT_PREDICTALOT:-60r/m};
+      limit_req_zone $$binary_remote_addr zone=audiolla:10m rate=${RATELIMIT_AUDIOLLA:-30r/m};
+      limit_req_zone $$binary_remote_addr zone=audiolla_cuda:10m rate=${RATELIMIT_AUDIOLLA_CUDA:-30r/m};
       limit_req_zone $$binary_remote_addr zone=mailbox:10m rate=${RATELIMIT_MAILBOX:-60r/m};
 
   proxq_config:
