@@ -74,16 +74,35 @@ _audiolla_test_catalog() {
     echo "OK: ${tag} catalog"
 }
 
+# v1.0.1: audio endpoints take JSON bodies; raw bytes only go to
+# PUT /v1/files/{path}. Stage the fixture once via PUT, then reference
+# it from each test via `file_path`. Each test stages under its own
+# subpath so they don't step on each other if /v1/files persists.
+
+_audiolla_stage_fixture() {
+    # $1 prefix, $2 tok, $3 fixture, $4 dest_path
+    local prefix="$1" tok="$2" fixture="$3" dest="$4"
+    curl -sf -m 60 -X PUT "$BASE_URL${prefix}/v1/files/${dest}" \
+        -H "Authorization: Bearer $tok" \
+        -H "Content-Type: application/octet-stream" \
+        --data-binary "@${fixture}" >/dev/null
+}
+
 _audiolla_test_info_live() {
     local prefix="$1" tag="$2"
     local fixture="tests/.fixtures/audio.mp3"
     [ -f "$fixture" ] || { echo "  SKIP: missing $fixture"; return 0; }
     local tok
     tok=$(_audiolla_token)
+    local staged="aigate-test/info.mp3"
+    _audiolla_stage_fixture "$prefix" "$tok" "$fixture" "$staged" || {
+        echo "  FAIL: ${tag} PUT ${prefix}/v1/files/${staged}"; return 1
+    }
     local out
     out=$(curl -sf -m 60 -X POST "$BASE_URL${prefix}/v1/audio/info" \
         -H "Authorization: Bearer $tok" \
-        -F "file=@${fixture}" 2>/dev/null) || {
+        -H "Content-Type: application/json" \
+        -d "{\"file_path\":\"${staged}\"}" 2>/dev/null) || {
         echo "  FAIL: ${tag} POST ${prefix}/v1/audio/info"; return 1
     }
     assert_contains "$out" "\"duration" "${tag} info response has duration field" || return 1
@@ -97,10 +116,15 @@ _audiolla_test_analyze_live() {
     [ -f "$fixture" ] || { echo "  SKIP: missing $fixture"; return 0; }
     local tok
     tok=$(_audiolla_token)
+    local staged="aigate-test/analyze.mp3"
+    _audiolla_stage_fixture "$prefix" "$tok" "$fixture" "$staged" || {
+        echo "  FAIL: ${tag} PUT ${prefix}/v1/files/${staged}"; return 1
+    }
     local out
     out=$(curl -sf -m 120 -X POST "$BASE_URL${prefix}/v1/audio/analyze" \
         -H "Authorization: Bearer $tok" \
-        -F "file=@${fixture}" 2>/dev/null) || {
+        -H "Content-Type: application/json" \
+        -d "{\"file_path\":\"${staged}\"}" 2>/dev/null) || {
         echo "  FAIL: ${tag} POST ${prefix}/v1/audio/analyze"; return 1
     }
     assert_contains "$out" "\"bpm\"" "${tag} analyze response has bpm" || return 1

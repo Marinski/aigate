@@ -267,7 +267,7 @@ services:
   # Upstream: github.com/psyb0t/docker-audiolla.
   audiolla:
     profiles: ["audiolla"]
-    image: psyb0t/audiolla:v0.23.1
+    image: psyb0t/audiolla:v1.0.1
     restart: unless-stopped
     mem_limit: ${AUDIOLLA_MEM_LIMIT:-8g}
     memswap_limit: ${AUDIOLLA_MEMSWAP_LIMIT:-16g}
@@ -289,6 +289,10 @@ services:
       AUDIOLLA_JOB_TTL: ${AUDIOLLA_JOB_TTL:-1h}
       AUDIOLLA_JOB_MAX_CONCURRENT: ${AUDIOLLA_JOB_MAX_CONCURRENT:-8}
       HUGGINGFACE_TOKEN: ${HF_TOKEN:-}
+      # CC-BY-NC opt-in for MusicGen weights. Same gate pattern matchering
+      # uses for GPL v3. Unset → engine refuses to load the model. Read the
+      # facebookresearch/audiocraft LICENSE_weights before flipping this.
+      AUDIOLLA_ENABLE_NONCOMMERCIAL: ${AUDIOLLA_ENABLE_NONCOMMERCIAL:-}
     volumes:
       - ${DATA_DIR_AUDIOLLA:-${DATA_DIR:-.data}/audiolla}:/data
     healthcheck:
@@ -305,7 +309,7 @@ services:
 
   audiolla-cuda:
     profiles: ["audiolla-cuda"]
-    image: psyb0t/audiolla:v0.23.1-cuda
+    image: psyb0t/audiolla:v1.0.1-cuda
     restart: unless-stopped
     mem_limit: ${AUDIOLLA_CUDA_MEM_LIMIT:-12g}
     memswap_limit: ${AUDIOLLA_CUDA_MEMSWAP_LIMIT:-24g}
@@ -327,6 +331,10 @@ services:
       AUDIOLLA_JOB_TTL: ${AUDIOLLA_JOB_TTL:-1h}
       AUDIOLLA_JOB_MAX_CONCURRENT: ${AUDIOLLA_JOB_MAX_CONCURRENT:-8}
       HUGGINGFACE_TOKEN: ${HF_TOKEN:-}
+      # CC-BY-NC opt-in for MusicGen weights. Same gate pattern matchering
+      # uses for GPL v3. Unset → engine refuses to load the model. Read the
+      # facebookresearch/audiocraft LICENSE_weights before flipping this.
+      AUDIOLLA_ENABLE_NONCOMMERCIAL: ${AUDIOLLA_ENABLE_NONCOMMERCIAL:-}
     volumes:
       - ${DATA_DIR_AUDIOLLA:-${DATA_DIR:-.data}/audiolla}:/data
     deploy:

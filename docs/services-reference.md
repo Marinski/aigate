@@ -625,11 +625,11 @@ Env vars: `PREDICTALOT_AUTH_TOKEN`, `PREDICTALOT_DEVICE` (CPU), `PREDICTALOT_CUD
 
 ## audiolla (optional, `AUDIOLLA=1` / `AUDIOLLA_CUDA=1`)
 
-Self-hosted **audio-production** REST + MCP API. Stem separation (Demucs / UVR), restoration (UVR de-reverb / de-echo / de-noise), mastering (matchering + pedalboard chains), MIR analysis (librosa: BPM, key, LUFS, beats, onsets, melody, chords, segments), DSP transforms (sox + ffmpeg), loudness normalization, speech enhancement (DeepFilterNet), VAD (silero), diarization (pyannote), CLAP embeddings + zero-shot classification, AudioSet tagging (AST), audio→MIDI (basic-pitch), MIDI compose / inspect / transform / render via fluidsynth.
+Self-hosted **audio-production** REST + MCP API (v1.0.1+). Stem separation (Demucs / UVR), restoration (UVR de-reverb / de-echo / de-noise), mastering (matchering + pedalboard chains), MIR analysis (librosa: BPM, key, LUFS, beats, onsets, melody, chords, segments), DSP transforms (sox + ffmpeg), loudness normalization, speech enhancement (DeepFilterNet), VAD (silero), diarization (pyannote), CLAP embeddings + zero-shot classification, AudioSet tagging (AST), audio→MIDI (basic-pitch), MIDI compose / inspect / transform / render via fluidsynth. **CUDA-only text-to-audio generation** under `POST /v1/audio/generate/{engine}`: `stable-audio-open` (Stability Community Licence), `musicgen-small` / `musicgen-medium` (CC-BY-NC — gated on `AUDIOLLA_ENABLE_NONCOMMERCIAL=1`), `riffusion` (CreativeML OpenRAIL-M), `audioldm2` (CC-BY 4.0 — commercial-safe, no opt-in).
 
 Curated YAML workflow presets ship in-image (`master-for-spotify`, `podcast-cleanup`, `vocal-cleanup`). Ad-hoc op-chain pipelines run server-side — intermediates stay in memory between steps, no re-upload. Async jobs + webhooks for long-running work. Direct nginx route, not via LiteLLM. MCP is aggregated into `/mcp/`.
 
-Audio output modes (per audio-producing tool): default base64, `output_path` (stages under `${DATA_DIR_AUDIOLLA}/files` for follow-up tools), `output_url` (PUT to a presigned URL).
+**API contract (breaking from v0.23.x):** every audio endpoint takes a **JSON body**. The only multipart/raw-bytes route is `PUT /v1/files/{path}` for staging. Input is `file_path` (FILES_DIR-relative, after staging) XOR `file_url` (server fetches, subject to `AUDIOLLA_FETCH_MODE`). Audio-producing tools require **`output_path` XOR `output_url`** (`output_path` stages under `${DATA_DIR_AUDIOLLA}/files` — caller downloads via `GET /v1/files/<path>`; `output_url` PUTs to a presigned URL). The pre-1.0 `*_base64` response fields are gone — pull results from the staging area.
 
 CPU and CUDA variants run **side-by-side** on distinct routes and aliases — `/audiolla/` → CPU container, `/audiolla-cuda/` → GPU container. Enable independently via `AUDIOLLA=1` and/or `AUDIOLLA_CUDA=1`. CUDA needs `nvidia-container-toolkit` and is significantly faster on Demucs, UVR, pyannote, basic-pitch, DeepFilterNet, CLAP. Both share `${DATA_DIR_AUDIOLLA}` for the weight cache, so the second variant to boot reuses the first's downloads with zero re-fetch.
 
@@ -644,9 +644,9 @@ CPU and CUDA variants run **side-by-side** on distinct routes and aliases — `/
 
 Auth: `Authorization: Bearer $AUDIOLLA_AUTH_TOKEN` (defaults to `AIGATE_TOKEN`). Pyannote diarization additionally needs `HF_TOKEN` + the user accepting model terms at huggingface.co/pyannote/speaker-diarization-3.1.
 
-Full API — every endpoint, every request/response shape, all 50+ engines, presets, pipelines, MCP tool list, server-side URL fetch policy: **[docker-audiolla README](https://github.com/psyb0t/docker-audiolla)**.
+Full API — every endpoint, every request/response shape, all 90+ routes, generation engines, presets, pipelines, MCP tool list, server-side URL fetch policy, the v0.23→v1.0 migration cheatsheet, and the canonical `openapi.yaml`: **[docker-audiolla README](https://github.com/psyb0t/docker-audiolla)**.
 
-Env vars: `AUDIOLLA_AUTH_TOKEN`, `AUDIOLLA_DEVICE`, `AUDIOLLA_ENABLED_ENGINES`, `AUDIOLLA_PRELOAD`, `AUDIOLLA_ENGINE_TTL`, `AUDIOLLA_SWEEPER_INTERVAL`, `AUDIOLLA_MAX_UPLOAD_BYTES`, `AUDIOLLA_FETCH_*` (server-side URL fetch policy), `AUDIOLLA_JOB_TTL`, `AUDIOLLA_JOB_MAX_CONCURRENT`, `DATA_DIR_AUDIOLLA`, `RATELIMIT_AUDIOLLA[_BURST]`, `TIMEOUT_AUDIOLLA`. Full reference in [`.env.example`](../.env.example).
+Env vars: `AUDIOLLA_AUTH_TOKEN`, `AUDIOLLA_DEVICE`, `AUDIOLLA_ENABLED_ENGINES`, `AUDIOLLA_PRELOAD`, `AUDIOLLA_ENGINE_TTL`, `AUDIOLLA_SWEEPER_INTERVAL`, `AUDIOLLA_MAX_UPLOAD_BYTES`, `AUDIOLLA_FETCH_*` (server-side URL fetch policy), `AUDIOLLA_JOB_TTL`, `AUDIOLLA_JOB_MAX_CONCURRENT`, `AUDIOLLA_ENABLE_NONCOMMERCIAL` (CC-BY-NC opt-in for MusicGen), `DATA_DIR_AUDIOLLA`, `RATELIMIT_AUDIOLLA[_BURST]`, `TIMEOUT_AUDIOLLA`. Full reference in [`.env.example`](../.env.example).
 
 ---
 
