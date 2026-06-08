@@ -1,3 +1,62 @@
+# pibox-zai — pi-coding-agent (via z.ai GLM models) wrapped by aicodebox.
+# OpenAI-compatible endpoint at /openai/v1/chat/completions.
+# Image bumped to v0.8.0 (riding on aicodebox v0.7.0).
+#
+# ── What the OpenAI-style endpoint actually supports ───────────────────────
+#
+# Body fields READ:
+#   model, messages, stream, reasoning_effort (→ pi --thinking)
+#
+# Body fields REJECTED with 400:
+#   tools / tool_choice              ("agent runs its own tools" — use the
+#                                     x-aicodebox-tools-allowlist /
+#                                     x-aicodebox-no-tools headers instead)
+#   response_format.type=json_object ("use the x-aicodebox-json-schema
+#                                     header instead")
+#
+# Body fields SILENTLY DROPPED (Pydantic extra="ignore" on _OAIRequest):
+#   temperature, top_p, max_tokens, presence_penalty, frequency_penalty,
+#   seed, stop, n, user, metadata, parallel_tool_calls, logprobs, ...
+#   (these aren't pi's dials — pi has its own pipeline)
+#
+# Headers READ (forwarded via base.yaml `forward_client_headers_to_llm_api`).
+# Every RunSpec knob exposed by /run is also reachable as a header here:
+#
+#   x-aicodebox-workspace            workspace subdir under /workspace
+#                                    (alt: x-claude-workspace)
+#   x-aicodebox-continue             "1"/"true"/"yes" → resume previous
+#                                    session; absent → fresh
+#                                    (alt: x-claude-continue)
+#   x-aicodebox-append-system-prompt appends to pi's system prompt
+#                                    (alt: x-claude-append-system-prompt)
+#   x-aicodebox-json-schema          JSON object — flips run to
+#                                    json-verbose output_format and
+#                                    schema-validates the final turn
+#                                    (up to 3 self-correction retries)
+#   x-aicodebox-resume               specific adapter session id to resume
+#   x-aicodebox-no-tools             "1"/"true"/"yes" → pi runs with
+#                                    --no-tools (no shell / file / mcp)
+#   x-aicodebox-tools-allowlist      JSON array OR CSV — pi --tools <list>
+#                                    (mutually exclusive with no-tools)
+#   x-aicodebox-extra-args           JSON array OR CSV — appended to pi argv
+#   x-aicodebox-timeout-seconds      int — per-run wall-clock cap
+#
+# Malformed header values surface as 400 with the offending header name.
+#
+# OpenAI SDK usage:
+#   client.chat.completions.create(
+#       model="pibox-zai-glm-4.7",
+#       messages=[...],
+#       extra_headers={
+#           "x-aicodebox-workspace": "my-project",
+#           "x-aicodebox-continue": "1",
+#           "x-aicodebox-no-tools": "1",
+#           "x-aicodebox-timeout-seconds": "600",
+#           # or a JSON Schema for structured output:
+#           # "x-aicodebox-json-schema": json.dumps({"type":"object",...}),
+#       },
+#   )
+
 - model_name: pibox-zai-glm-5.1
   litellm_params:
     model: openai/glm-5.1

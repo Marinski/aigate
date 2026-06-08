@@ -2,6 +2,44 @@
 
 All notable changes to this project are documented here.
 
+## [v3.6.0] — 2026-06-08
+
+Pass-through for pibox-zai's per-request agent knobs over the OpenAI-compatible endpoint, plus a Makefile fix for the v3.4.0 profile autodetect.
+
+### Bump: pibox-zai → v0.8.0 (full `x-aicodebox-*` header surface)
+
+Upstream `psyb0t/pibox:v0.8.0` rides on aicodebox v0.7.0, which exposes every RunSpec knob as an `x-aicodebox-*` header on `/openai/v1/chat/completions`. Previously only 3 of the 9 were reachable from the OpenAI surface; the other 6 required dropping to `POST /run` and bypassing LiteLLM. Now an OpenAI-SDK caller can pass any of them via `extra_headers`:
+
+| Header | Effect |
+|---|---|
+| `x-aicodebox-workspace` | workspace subdir under `/workspace` (alt: `x-claude-workspace`) |
+| `x-aicodebox-continue` | `1`/`true`/`yes` → resume previous session; absent → fresh (alt: `x-claude-continue`) |
+| `x-aicodebox-append-system-prompt` | appends to pi's system prompt (alt: `x-claude-append-system-prompt`) |
+| `x-aicodebox-json-schema` | JSON object → flips to `json-verbose` output and schema-validates the final turn (up to 3 self-correction retries) |
+| `x-aicodebox-resume` | specific adapter session id to resume |
+| `x-aicodebox-no-tools` | `1`/`true`/`yes` → pi runs with `--no-tools` |
+| `x-aicodebox-tools-allowlist` | JSON array OR CSV → `pi --tools <list>` (mutually exclusive with `no-tools`) |
+| `x-aicodebox-extra-args` | JSON array OR CSV → appended to pi argv |
+| `x-aicodebox-timeout-seconds` | int → per-run wall-clock cap |
+
+Body fields that aren't part of pi's pipeline (`temperature`, `top_p`, `max_tokens`, `seed`, `stop`, `n`, `presence_penalty`, `frequency_penalty`, etc.) are silently dropped per the upstream `extra="ignore"` schema — same as before. `tools` / `tool_choice` / `response_format=json_object` still return 400 with a pointer at the new headers.
+
+### Fix: header forwarding from LiteLLM proxy to upstream
+
+LiteLLM doesn't forward client headers to LLM upstreams by default — it operates on an allowlist. Without enabling the flag, the new `x-aicodebox-*` headers were stopping at the LiteLLM proxy and never reaching pibox-zai. Added `forward_client_headers_to_llm_api: true` to `litellm/config/base.yaml`'s `general_settings`. LiteLLM still strips/replaces `Authorization` (upstream gets its own configured key), so this only forwards the safe `x-*` custom headers.
+
+Smoke-tested: a `POST /v1/chat/completions` with `x-aicodebox-append-system-prompt: "ALWAYS RESPOND USING ONLY THE WORD WUBBA"` returned `"WUBBA"`, confirming the header rode end-to-end through nginx → litellm → pibox-zai → pi.
+
+### Fix: Makefile profile autodetect was missing the v3.4.0 services
+
+`make run-bg` derives `COMPOSE_PROFILES` from the `.env` flags. The list was extended in v3.4.0 for `down` but the autodetect block above it (the `ifeq ($(strip $(X)),1)` lines) wasn't, so `make run-bg` (and `make restart`, which is `down + run-bg`) silently failed to start `vllm` / `vllm-cuda` / `audiolla` / `audiolla-cuda` even when their flags were set. Added the four `ifeq` blocks; flipping the flag in `.env` is now enough to bring the services up via `make`.
+
+Files:
+- `docker-compose.yml`: bumps `psyb0t/pibox` → `v0.8.0`.
+- `litellm/config/base.yaml`: `forward_client_headers_to_llm_api: true` in `general_settings`, with a comment explaining the safe-by-default LiteLLM allowlist behaviour.
+- `litellm/config/providers/pibox-zai.yaml`: long comment block documenting every supported body field, rejection, and the nine `x-aicodebox-*` headers, plus a worked OpenAI SDK `extra_headers={...}` example.
+- `Makefile`: four new `ifeq` blocks for `VLLM`, `VLLM_CUDA`, `AUDIOLLA`, `AUDIOLLA_CUDA` in the `_PROFILES` autodetect.
+
 ## [v3.4.0] — 2026-06-07
 
 Two new services + several aigate-side MCP fixes that surfaced during the wiring.

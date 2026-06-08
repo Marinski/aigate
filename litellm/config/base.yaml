@@ -18,6 +18,16 @@ general_settings:
   request_timeout: 86400
   drop_params: true
 
+  # Forward `x-*` client headers to upstream LLM APIs. Enables aigate
+  # callers to pass aicodebox / claudebox / pibox-specific knobs that
+  # those upstreams read off headers rather than the JSON body:
+  #   x-aicodebox-workspace          (also: x-claude-workspace)
+  #   x-aicodebox-continue           (also: x-claude-continue)
+  #   x-aicodebox-append-system-prompt (also: x-claude-append-system-prompt)
+  # LiteLLM's allowlist forwards x-* headers only, never Authorization
+  # (master key stays on the LiteLLM side, upstream gets its own creds).
+  forward_client_headers_to_llm_api: true
+
 litellm_settings:
   drop_params: true
   num_retries: 3

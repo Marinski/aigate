@@ -98,6 +98,26 @@ ifeq ($(strip $(PREDICTALOT_CUDA)),1)
   _PROFILES += predictalot-cuda
 endif
 
+# audiolla: opt-in with AUDIOLLA=1
+ifeq ($(strip $(AUDIOLLA)),1)
+  _PROFILES += audiolla
+endif
+
+# audiolla CUDA: opt-in with AUDIOLLA_CUDA=1
+ifeq ($(strip $(AUDIOLLA_CUDA)),1)
+  _PROFILES += audiolla-cuda
+endif
+
+# vllm (CPU): opt-in with VLLM=1
+ifeq ($(strip $(VLLM)),1)
+  _PROFILES += vllm
+endif
+
+# vllm CUDA: opt-in with VLLM_CUDA=1
+ifeq ($(strip $(VLLM_CUDA)),1)
+  _PROFILES += vllm-cuda
+endif
+
 # mailbox: opt-in with MAILBOX=1
 ifeq ($(strip $(MAILBOX)),1)
   _PROFILES += mailbox
