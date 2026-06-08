@@ -2,6 +2,27 @@
 
 All notable changes to this project are documented here.
 
+## [v3.7.1] — 2026-06-08
+
+Bump audiolla v1.0.1 → **v1.0.3**. Upstream shipped two patch releases that fix the exact issues that surfaced while smoke-testing v3.7.0's text-to-audio generators against the live aigate stack:
+
+- **v1.0.2** — `HF_HUB_OFFLINE` default flipped to `0`. The previous image baked it to `1`, which refused even the lazy-download path used by every audio engine that pulls weights from the Hub on first request (`audioldm2`, `stable-audio-open`, `musicgen-*`, `riffusion`, `ast-tag`, `clap-embed`, `pyannote`). Every generation request 500'd with `OSError: model is not cached locally and an error occurred while trying to fetch metadata from the Hub`. Strict-offline deployments now opt back in via `-e HF_HUB_OFFLINE=1`.
+- **v1.0.3** — Entrypoint mirrors `HUGGINGFACE_TOKEN ↔ HF_TOKEN`. `huggingface_hub` (the library underneath `diffusers` / `transformers`) reads `HF_TOKEN` as canonical — older audiolla docs (and aigate's compose env block) only set `HUGGINGFACE_TOKEN`, so gated repos got an anonymous request and 401'd even when the operator's token was authorised. Either env name is now sufficient.
+
+Both bugs had been worked around manually in a draft v3.7.1 (compose-side env overrides `HF_HUB_OFFLINE=0` and `HF_TOKEN: ${HF_TOKEN:-}`). That draft is now superseded — upstream merged the same fixes, so the aigate-side overrides are deleted and the compose env block reverts to just `HUGGINGFACE_TOKEN: ${HF_TOKEN:-}`.
+
+Verified end-to-end against the live aigate stack post-bump — all three generation engines from v3.7.0 work with no aigate-side workarounds:
+
+| Engine | First-call time | Output |
+|---|---|---|
+| `audioldm2` (CC-BY 4.0, ungated) | 182 s (incl. ~3 GB download) | 4 s WAV, 128 KB |
+| `musicgen-small` (CC-BY-NC, ungated on HF, gated on `AUDIOLLA_ENABLE_NONCOMMERCIAL=1`) | 86 s (incl. download) | 4 s WAV, 256 KB |
+| `stable-audio-open` (Stability Community Licence, HF-gated) | 270 s (incl. ~6 GB download, after operator accepted the licence at huggingface.co) | 4 s WAV, 706 KB |
+
+Files:
+
+- `docker-compose.yml`: pinned images bumped on both audiolla services — `psyb0t/audiolla:v1.0.1` → `psyb0t/audiolla:v1.0.3` and `v1.0.1-cuda` → `v1.0.3-cuda`. Deleted the two draft-v3.7.1 env overrides on both services (`HF_HUB_OFFLINE: ${AUDIOLLA_HF_HUB_OFFLINE:-0}` and `HF_TOKEN: ${HF_TOKEN:-}`) — now redundant with upstream's defaults.
+
 ## [v3.7.0] — 2026-06-08
 
 Bump audiolla v0.23.1 → **v1.0.1** (both CPU and CUDA). Upstream jumped straight to a 1.0 stability commitment with a fully breaking REST contract; every v0.23.x client breaks. Aigate-side this means rewriting the smoke tests and the docs/usage snippets, updating the MCP descriptions LiteLLM hands to LLM agents, and adding one new env var to gate the CC-BY-NC MusicGen weights.

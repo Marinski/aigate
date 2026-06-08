@@ -267,7 +267,7 @@ services:
   # Upstream: github.com/psyb0t/docker-audiolla.
   audiolla:
     profiles: ["audiolla"]
-    image: psyb0t/audiolla:v1.0.1
+    image: psyb0t/audiolla:v1.0.3
     restart: unless-stopped
     mem_limit: ${AUDIOLLA_MEM_LIMIT:-8g}
     memswap_limit: ${AUDIOLLA_MEMSWAP_LIMIT:-16g}
@@ -309,7 +309,7 @@ services:
 
   audiolla-cuda:
     profiles: ["audiolla-cuda"]
-    image: psyb0t/audiolla:v1.0.1-cuda
+    image: psyb0t/audiolla:v1.0.3-cuda
     restart: unless-stopped
     mem_limit: ${AUDIOLLA_CUDA_MEM_LIMIT:-12g}
     memswap_limit: ${AUDIOLLA_CUDA_MEMSWAP_LIMIT:-24g}
