@@ -354,7 +354,7 @@ Local image generation via [stable-diffusion.cpp](https://github.com/leejet/stab
 
 ## talkies — Unified OpenAI-compatible speech (optional, `TALKIES=1` or `TALKIES_CUDA=1`)
 
-External image: [`psyb0t/talkies`](https://github.com/psyb0t/docker-talkies) (pinned to `v0.4.0` / `v0.4.0-cuda`). One container, both endpoints: `POST /v1/audio/transcriptions` (whisper + canary + parakeet) and `POST /v1/audio/speech` (Kokoro-82M TTS, plus Qwen3-TTS voice cloning on CUDA). CPU image ships the four ASR models that run reasonably without a GPU (three Whisper variants + `canary-180m-flash`) plus Kokoro. CUDA image adds Parakeet-TDT, Canary-1B-Flash, Canary-Qwen-2.5B SALM, and Qwen3-TTS-0.6B (voice cloning, 17 languages) on top. Kokoro stays CPU-bound in both images.
+External image: [`psyb0t/talkies`](https://github.com/psyb0t/docker-talkies) (pinned to `v0.9.0` / `v0.9.0-cuda`). One container, both endpoints: `POST /v1/audio/transcriptions` (whisper + canary + parakeet + nemotron) and `POST /v1/audio/speech` (Kokoro-82M TTS in both PyTorch and ONNXRuntime variants, plus the full Qwen3-TTS line on CUDA). CPU image ships **6 models** — four ASR (`whisper-large-v3`, `whisper-large-v3-turbo`, `canary-180m-flash`, `nemotron-3.5-asr-0.6b` via parakeet.cpp) plus two TTS (`kokoro-82m` PyTorch and `kokoro-82m-nvidia` ONNXRuntime). CUDA image ships **14 models** — adds Parakeet-TDT, Canary-1B-Flash, Canary-Qwen-2.5B SALM, and the full Qwen3-TTS line (Base 0.6B + Base 1.7B + CustomVoice 0.6B + CustomVoice 1.7B + VoiceDesign 1.7B). Kokoro stays CPU-bound in both images.
 
 ### Endpoints (internal — accessed through LiteLLM, not directly via nginx)
 
@@ -374,13 +374,20 @@ External image: [`psyb0t/talkies`](https://github.com/psyb0t/docker-talkies) (pi
 **CPU** (`TALKIES=1`):
 - `whisper-large-v3`, `whisper-large-v3-turbo` — multilingual ASR
 - `canary-180m-flash` — English ASR (FastConformer)
-- `kokoro-82m` — TTS, ~41 voices across en/es/fr/hi/it/pt
+- `nemotron-3.5-asr-0.6b` — NVIDIA Nemotron-3.5-ASR-Streaming-0.6B via [parakeet.cpp](https://github.com/mudler/parakeet.cpp) (OpenMDW-1.1, 40+ locales, per-word timestamps + confidence, WER-0 vs NeMo). C++17/ggml backend; CPU-only in both images at this stage. Operators can register additional parakeet.cpp checkpoints (any Parakeet TDT/CTC/RNNT GGUF in [mudler/parakeet-cpp-gguf](https://huggingface.co/mudler/parakeet-cpp-gguf)) via a custom `models.json`.
+- `kokoro-82m` — TTS via PyTorch / misaki G2P, ~41 voices across en/es/fr/hi/it/pt
+- `kokoro-82m-nvidia` — TTS via NVIDIA's TensorRT-friendly [ONNX export](https://huggingface.co/nvidia/kokoro-82M-onnx-opt) + espeak-ng G2P. Same 40-voice catalog and wire shape; no PyTorch on the inference hot path.
 
 **CUDA** (`TALKIES_CUDA=1`): all of the above plus
 - `parakeet-tdt-0.6b-v3` — 25 European languages (NeMo RNNT)
 - `canary-1b-flash` — EN/DE/FR/ES + EN↔X translation (NeMo multitask)
 - `canary-qwen-2.5b` — English, NeMo SALM hybrid ASR+LLM (text-only; no per-word timestamps)
-- `qwen3-tts-0.6b` — voice cloning, 17 languages (en, zh, ja, ko, fr, de, es, it, pt, ru, vi, th, id, ar, tr, pl, nl). Drop a `<name>.wav` (10-30s clean speech) into `${DATA_DIR_TALKIES}/custom-voices/` on the host (mounted as `/data/custom-voices` inside the container) and use `voice=<name>` on `/v1/audio/speech`. Samples `alloy`/`echo`/`fable` baked in. Nested paths supported (`voice=clients/acme/jane` → `${DATA_DIR_TALKIES}/custom-voices/clients/acme/jane.wav`).
+- **Qwen3-TTS family — mode is implicit in the model slug; `voice` and `instructions` semantics shift per mode**:
+  - `qwen3-tts-0.6b` / `qwen3-tts-1.7b` — Base mode. Voice cloning via reference `.wav` files. Drop a `<name>.wav` (10-30 s clean speech) into `${DATA_DIR_TALKIES}/custom-voices/` on the host (mounted as `/data/custom-voices` inside the container) and use `voice=<name>` on `/v1/audio/speech`. Samples `alloy` / `echo` / `fable` baked in. Nested paths supported (`voice=clients/acme/jane` → `${DATA_DIR_TALKIES}/custom-voices/clients/acme/jane.wav`). 17 languages (en, zh, ja, ko, fr, de, es, it, pt, ru, vi, th, id, ar, tr, pl, nl).
+  - `qwen3-tts-0.6b-custom` / `qwen3-tts-1.7b-custom` — CustomVoice mode. Pass `voice=<preset>` where preset is one of 9 baked-in speakers: `Vivian`, `Serena`, `Uncle_Fu`, `Dylan`, `Eric`, `Ryan`, `Aiden`, `Ono_Anna`, `Sohee`. The 1.7B variant also accepts `instructions=<emotion>` (`"happy"` / `"sad"` / …).
+  - `qwen3-tts-1.7b-design` — VoiceDesign mode. Pass `voice="design"` (sentinel) + `instructions=<natural-language description>` (e.g. `"a young energetic female voice"`); the model synthesises a voice that matches the description.
+  - **Per-request sampling controls** (v0.8.0+, OpenAI-extras via `extra_body` on official SDKs, all modes): `temperature`, `top_k`, `top_p`, `repetition_penalty`, `max_new_tokens`, `do_sample`, plus `language` (for CustomVoice / VoiceDesign). Out-of-range returns 422.
+  - **PCM streaming** (v0.7.0+): `response_format="pcm"` streams the raw PCM body via HTTP/1.1 chunked transfer-encoding (TTFA ~200-700 ms vs ~3-8 s buffered). Tune chunk size via `TALKIES_QWEN3_STREAM_CHUNK_SIZE` (default `8` codec-steps-per-chunk).
 
 ### Behavior
 

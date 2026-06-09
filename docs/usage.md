@@ -437,7 +437,7 @@ curl http://localhost:4000/audio/transcriptions \
 Transcription models — talkies (CPU+CUDA), plus the hosted Groq/OpenAI offerings:
 
 - **Cloud**: `groq-whisper-large-v3-turbo`, `groq-whisper-large-v3`, `voxtral-small`, `openai-whisper`, `openai-gpt-4o-transcribe`, `openai-gpt-4o-mini-transcribe`
-- **Local talkies CPU** (`TALKIES=1`): `local-talkies-whisper-large-v3`, `local-talkies-whisper-large-v3-turbo`, `local-talkies-canary-180m-flash`
+- **Local talkies CPU** (`TALKIES=1`): `local-talkies-whisper-large-v3`, `local-talkies-whisper-large-v3-turbo`, `local-talkies-canary-180m-flash`, `local-talkies-nemotron-3.5-asr-0.6b` (NVIDIA Nemotron-3.5-ASR via parakeet.cpp — 40+ locales, per-word timestamps + confidence)
 - **Local talkies CUDA** (`TALKIES_CUDA=1`): same as CPU plus `local-talkies-cuda-parakeet-tdt-0.6b-v3`, `local-talkies-cuda-canary-1b-flash` (EN/DE/FR/ES + EN↔X translation), `local-talkies-cuda-canary-qwen-2.5b` (hybrid SALM)
 
 talkies-specific knobs (any model): `response_format=text|json|verbose_json|srt|vtt`, `diarization=true` (stereo channel-split — left=L, right=R, segments tagged with `channel`).
@@ -454,15 +454,49 @@ curl http://localhost:4000/audio/speech \
   -d '{"model": "local-talkies-kokoro-tts", "input": "Hello world", "voice": "af_heart"}' \
   -o speech.mp3
 
-# CUDA — Qwen3-TTS voice cloning (also inside talkies-cuda as of v0.4.0)
+# CPU — Kokoro served via NVIDIA's ONNXRuntime export (no PyTorch on hot path)
+curl http://localhost:4000/audio/speech \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model": "local-talkies-kokoro-82m-nvidia", "input": "Hello world", "voice": "af_heart"}' \
+  -o speech.mp3
+
+# CUDA — Qwen3-TTS Base 0.6B voice cloning (also inside talkies-cuda as of v0.4.0)
 curl http://localhost:4000/audio/speech \
   -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
   -H "Content-Type: application/json" \
   -d '{"model": "local-talkies-cuda-qwen3-tts", "input": "Hello world", "voice": "alloy"}' \
   -o speech.mp3
+
+# CUDA — Qwen3-TTS CustomVoice 1.7B + emotion (one of 9 preset speakers)
+curl http://localhost:4000/audio/speech \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model": "local-talkies-cuda-qwen3-tts-1.7b-custom", "input": "Hello world", "voice": "Vivian", "instructions": "happy"}' \
+  -o speech.mp3
+
+# CUDA — Qwen3-TTS VoiceDesign (synthesise a voice from a natural-language description)
+curl http://localhost:4000/audio/speech \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model": "local-talkies-cuda-qwen3-tts-1.7b-design", "input": "Hello world", "voice": "design", "instructions": "a young energetic female voice"}' \
+  -o speech.mp3
 ```
 
-TTS models: `local-talkies-kokoro-tts` (Kokoro 82M, CPU, ~41 voices across en/es/fr/hi/it/pt), `local-talkies-cuda-kokoro-tts` (same model, served inside the CUDA talkies container — Kokoro still runs on CPU there), `local-talkies-cuda-qwen3-tts` (Qwen3-TTS-0.6B voice cloning — drop reference `.wav` files into `${DATA_DIR_TALKIES}/custom-voices/` and use `voice=<filename-without-ext>`; samples `alloy`/`echo`/`fable` baked in), `openai-tts-1`, `openai-tts-1-hd`.
+TTS models:
+
+- **Kokoro family (~41 voices across en/es/fr/hi/it/pt — discover via `GET /v1/audio/voices`)**:
+  - `local-talkies-kokoro-tts` / `local-talkies-cuda-kokoro-tts` — PyTorch path, Kokoro still runs on CPU even inside the CUDA image.
+  - `local-talkies-kokoro-82m-nvidia` / `local-talkies-cuda-kokoro-82m-nvidia` — same weights and voice catalog, but served via ONNXRuntime against NVIDIA's TensorRT-friendly ONNX export. No PyTorch on the inference hot path; G2P via espeak-ng. Pick this if you want a leaner runtime; pick the PyTorch one if you prefer misaki-driven G2P quality.
+- **Qwen3-TTS family (CUDA-only — 4 modes, all wire-shape OpenAI-compatible; mode is implicit in the model slug)**:
+  - `local-talkies-cuda-qwen3-tts` (0.6B Base) / `local-talkies-cuda-qwen3-tts-1.7b` (1.7B Base) — voice cloning. Drop a reference `.wav` (10-30 s clean speech) into `${DATA_DIR_TALKIES}/custom-voices/` and use `voice=<filename-without-ext>`. Nested paths supported (`voice=clients/acme/jane` → `${DATA_DIR_TALKIES}/custom-voices/clients/acme/jane.wav`). Samples `alloy` / `echo` / `fable` baked in. 17 languages.
+  - `local-talkies-cuda-qwen3-tts-0.6b-custom` / `local-talkies-cuda-qwen3-tts-1.7b-custom` — CustomVoice mode. Pass `voice=<preset>` where preset is one of 9 baked-in speakers: `Vivian`, `Serena`, `Uncle_Fu`, `Dylan`, `Eric`, `Ryan`, `Aiden`, `Ono_Anna`, `Sohee`. The `1.7b-custom` variant also takes `instructions=<emotion>` (`"happy"` / `"sad"` / …).
+  - `local-talkies-cuda-qwen3-tts-1.7b-design` — VoiceDesign mode. Pass `voice="design"` (sentinel) + `instructions=<natural-language description>`; the model synthesises a voice that matches the description.
+- **Cloud**: `openai-tts-1`, `openai-tts-1-hd`.
+
+Per-request sampling controls on Qwen3-TTS (v0.8.0+, OpenAI-extras via `extra_body` on official SDKs): `temperature`, `top_k`, `top_p`, `repetition_penalty`, `max_new_tokens`, `do_sample`, plus `language` for CustomVoice / VoiceDesign. Out-of-range returns 422.
+
+Qwen3-TTS streaming: `response_format="pcm"` against any qwen3_tts model streams the raw PCM body via HTTP/1.1 chunked transfer-encoding (TTFA ~200-700 ms vs ~3-8 s buffered). Tune chunk size via `TALKIES_QWEN3_STREAM_CHUNK_SIZE` (default `8` codec-steps-per-chunk).
 
 ---
 

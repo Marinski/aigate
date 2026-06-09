@@ -227,18 +227,20 @@ Requires `nvidia-container-toolkit`. Flash attention + quantized KV cache enable
 
 ## talkies CPU (local — `TALKIES=1`)
 
-Unified OpenAI-compatible speech service via [`psyb0t/talkies:v0.3.0`](https://github.com/psyb0t/docker-talkies). One container exposes both `/v1/audio/transcriptions` (whisper + canary-180m) and `/v1/audio/speech` (Kokoro-82M TTS). Stereo channel-split diarization (`diarization=true` → segments tagged with `"channel": "L"/"R"`), VAD-chunked long audio, idle-unload TTL. Weights auto-downloaded into `.data/talkies/` on first request. Loaded models auto-unload after `TALKIES_MODEL_TTL` (default `10m`).
+Unified OpenAI-compatible speech service via [`psyb0t/talkies:v0.9.0`](https://github.com/psyb0t/docker-talkies). One container exposes both `/v1/audio/transcriptions` (whisper + canary-180m + nemotron-3.5-asr) and `/v1/audio/speech` (Kokoro-82M PyTorch + Kokoro-82M ONNXRuntime). Stereo channel-split diarization (`diarization=true` → segments tagged with `"channel": "L"/"R"`), VAD-chunked long audio, idle-unload TTL. Weights auto-downloaded into `.data/talkies/` on first request. Loaded models auto-unload after `TALKIES_MODEL_TTL` (default `10m`).
 
 | Alias | Model | Mode |
 | ----- | ----- | ---- |
 | `local-talkies-whisper-large-v3` | Systran/faster-whisper-large-v3 | transcription (multilingual, highest accuracy) |
 | `local-talkies-whisper-large-v3-turbo` | deepdml/faster-whisper-large-v3-turbo-ct2 | transcription (multilingual, ~8x faster than large-v3) |
 | `local-talkies-canary-180m-flash` | nvidia/canary-180m-flash | transcription (English, FastConformer encoder) |
+| `local-talkies-nemotron-3.5-asr-0.6b` | nvidia/Nemotron-3.5-ASR-Streaming-0.6B (via parakeet.cpp / mudler/parakeet-cpp-gguf) | transcription (40+ locales, per-word timestamps, OpenMDW-1.1) |
 | `local-talkies-kokoro-tts` | hexgrad/Kokoro-82M | TTS — ~41 voices across en/es/fr/hi/it/pt (`af_heart`, `bm_george`, `ef_dora`, …; discover via `GET /v1/audio/voices`) |
+| `local-talkies-kokoro-82m-nvidia` | nvidia/kokoro-82M-onnx-opt | TTS — same Kokoro-82M weights via ONNXRuntime + espeak-ng G2P (no PyTorch on the inference hot path) |
 
 ## talkies CUDA (local NVIDIA — `TALKIES_CUDA=1`)
 
-CUDA-accelerated talkies (`psyb0t/talkies:v0.3.0-cuda`). Adds Parakeet TDT, Canary-1B-Flash, and Canary-Qwen-2.5B SALM on top of the CPU set. Kokoro TTS still runs on CPU inside the CUDA image (fast enough that it doesn't need a GPU). Shares `.data/talkies/` with the CPU variant. The LiteLLM resource manager evicts these from VRAM whenever a competing CUDA job (LLM / image / TTS / other STT) arrives.
+CUDA-accelerated talkies (`psyb0t/talkies:v0.9.0-cuda`). Adds Parakeet TDT, Canary-1B-Flash, Canary-Qwen-2.5B SALM, and the full Qwen3-TTS line (Base / CustomVoice / VoiceDesign across 0.6B + 1.7B) on top of the CPU set. Kokoro TTS still runs on CPU inside the CUDA image (fast enough that it doesn't need a GPU). Shares `.data/talkies/` with the CPU variant. The LiteLLM resource manager evicts these from VRAM whenever a competing CUDA job (LLM / image / TTS / other STT) arrives.
 
 | Alias | Model | Mode |
 | ----- | ----- | ---- |
@@ -248,8 +250,14 @@ CUDA-accelerated talkies (`psyb0t/talkies:v0.3.0-cuda`). Adds Parakeet TDT, Cana
 | `local-talkies-cuda-canary-180m-flash` | nvidia/canary-180m-flash | transcription (CUDA, English) |
 | `local-talkies-cuda-canary-1b-flash` | nvidia/canary-1b-flash | transcription (CUDA, EN/DE/FR/ES + EN↔X translation) |
 | `local-talkies-cuda-canary-qwen-2.5b` | nvidia/canary-qwen-2.5b | transcription (CUDA, English, NeMo SALM hybrid ASR+LLM) |
+| `local-talkies-cuda-nemotron-3.5-asr-0.6b` | nvidia/Nemotron-3.5-ASR-Streaming-0.6B (via parakeet.cpp) | transcription (40+ locales, per-word timestamps; runs CPU-only inside the CUDA image at this stage) |
 | `local-talkies-cuda-kokoro-tts` | hexgrad/Kokoro-82M | TTS (runs on CPU inside the CUDA image) |
-| `local-talkies-cuda-qwen3-tts` | Qwen/Qwen3-TTS-12Hz-0.6B-Base | TTS — voice cloning via reference `.wav` files in `${DATA_DIR_TALKIES}/custom-voices/`; samples `alloy`/`echo`/`fable` baked in; supports 17 languages (en, zh, ja, ko, fr, de, es, it, pt, ru, vi, th, id, ar, tr, pl, nl) |
+| `local-talkies-cuda-kokoro-82m-nvidia` | nvidia/kokoro-82M-onnx-opt | TTS — ONNXRuntime path, same voices as kokoro-82m |
+| `local-talkies-cuda-qwen3-tts` | Qwen/Qwen3-TTS-12Hz-0.6B-Base | TTS — Base 0.6B voice cloning via reference `.wav` files in `${DATA_DIR_TALKIES}/custom-voices/`; samples `alloy`/`echo`/`fable` baked in; supports 17 languages (en, zh, ja, ko, fr, de, es, it, pt, ru, vi, th, id, ar, tr, pl, nl) |
+| `local-talkies-cuda-qwen3-tts-1.7b` | Qwen/Qwen3-TTS-12Hz-1.7B-Base | TTS — Base 1.7B voice cloning (larger / higher quality than 0.6B) |
+| `local-talkies-cuda-qwen3-tts-0.6b-custom` | Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice | TTS — CustomVoice mode, 9 preset speakers (`Vivian`, `Serena`, `Uncle_Fu`, `Dylan`, `Eric`, `Ryan`, `Aiden`, `Ono_Anna`, `Sohee`) — pass as `voice=<preset>` |
+| `local-talkies-cuda-qwen3-tts-1.7b-custom` | Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice | TTS — same 9 preset speakers as the 0.6b-custom slug, plus `instructions=<emotion>` (`"happy"`, `"sad"`, …) |
+| `local-talkies-cuda-qwen3-tts-1.7b-design` | Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign | TTS — VoiceDesign mode. Pass `voice="design"` (sentinel) + `instructions=<natural-language description>` (e.g. `"a young energetic female voice"`); model synthesises a voice that matches the description |
 
 ## sd.cpp CPU (local — `SDCPP=1`)
 

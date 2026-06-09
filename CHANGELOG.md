@@ -2,6 +2,19 @@
 
 All notable changes to this project are documented here.
 
+## [v3.8.1] — 2026-06-09
+
+Docs-only sync for v3.8.0. No behaviour change, no image-pin change, no LiteLLM config change. The v3.8.0 commit shipped the actual code change (audiolla v1.0.5, talkies v0.9.0, nine new LiteLLM model entries) but left the prose docs pinned to the older talkies versions / older model lists. This release pulls the docs forward.
+
+### Files
+
+- `README.md`: services overview table — talkies CPU row updated from `psyb0t/talkies:v0.3.0` (3 Whisper variants + canary-180m + kokoro) to `psyb0t/talkies:v0.9.0` (6 models — adds `nemotron-3.5-asr-0.6b` and `kokoro-82m-nvidia`, drops the long-removed `distil-whisper-large-v3`). Talkies CUDA row updated from `v0.3.0-cuda` to `v0.9.0-cuda` (14 models — adds the full Qwen3-TTS line: Base 0.6B + Base 1.7B + CustomVoice 0.6B + CustomVoice 1.7B + VoiceDesign 1.7B).
+- `docs/providers.md`: talkies CPU + CUDA tables grow rows for every new model. CPU gains `local-talkies-nemotron-3.5-asr-0.6b` + `local-talkies-kokoro-82m-nvidia`. CUDA gains `local-talkies-cuda-nemotron-3.5-asr-0.6b`, `local-talkies-cuda-kokoro-82m-nvidia`, and the four Qwen3-TTS mode slugs (Base 1.7B, CustomVoice 0.6B, CustomVoice 1.7B + emotion, VoiceDesign 1.7B). Header lines updated from `v0.3.0` to `v0.9.0`.
+- `docs/services-reference.md`: talkies section header updated from `v0.4.0 / v0.4.0-cuda` to `v0.9.0 / v0.9.0-cuda`. "6 models / 14 models" counts now stated explicitly. Model bullet list reorganised — CPU bullets gain nemotron-3.5-asr + kokoro-82m-nvidia; CUDA bullets reorganised into a "Qwen3-TTS family" sub-section that documents how `voice` and `instructions` semantics shift per mode, plus PCM streaming + per-request sampling controls.
+- `docs/usage.md`: Transcription model list gains `local-talkies-nemotron-3.5-asr-0.6b` (CPU + CUDA). Text-to-speech section grows three new curl examples (Kokoro ONNX, Qwen3-TTS CustomVoice + emotion, Qwen3-TTS VoiceDesign) and the TTS model bullet list is reorganised into Kokoro / Qwen3-TTS families with per-mode `voice` + `instructions` semantics. Sampling-controls and PCM-streaming knobs are now mentioned in this doc too.
+- `docs/testing.md`: model-count assertion line updated — "CPU: 4 ASR + Kokoro; CUDA: 7 ASR + Kokoro" → "CPU: 4 ASR + 2 Kokoro = 6 models; CUDA: 7 ASR + 2 Kokoro + 5 Qwen3-TTS = 14 models".
+- `.env.example`: `TALKIES=` / `TALKIES_CUDA=` doc comments rewritten to describe the new model set (nemotron, kokoro-82m-nvidia, full Qwen3-TTS line with per-mode notes). New optional knob `TALKIES_QWEN3_STREAM_CHUNK_SIZE` (default `8`) documented for PCM streaming chunk size.
+
 ## [v3.8.0] — 2026-06-09
 
 Bump audiolla **v1.0.3 → v1.0.5** (both CPU and CUDA) and talkies **v0.5.0 → v0.9.0** (both CPU and CUDA). Both jumps add user-visible engines on the upstream side, so the LiteLLM provider configs grow nine new model entries (no MCP-side changes — talkies is non-MCP).
