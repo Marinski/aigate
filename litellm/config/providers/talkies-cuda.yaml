@@ -46,6 +46,17 @@
   model_info:
     mode: audio_transcription
 
+# New in talkies v0.9.0: multilingual ASR via parakeet.cpp (NVIDIA
+# Nemotron-3.5-ASR-Streaming-0.6B, OpenMDW-1.1, 40+ locales). Runs
+# CPU-only inside the CUDA image at this stage.
+- model_name: local-talkies-cuda-nemotron-3.5-asr-0.6b
+  litellm_params:
+    model: openai/nemotron-3.5-asr-0.6b
+    api_base: http://talkies-cuda:8000/v1
+    api_key: none
+  model_info:
+    mode: audio_transcription
+
 # Kokoro TTS shares the same talkies-cuda container as of v0.3.0 —
 # `POST /v1/audio/speech` routed to the same upstream.
 - model_name: local-talkies-cuda-kokoro-tts
@@ -56,13 +67,63 @@
   model_info:
     mode: audio_speech
 
-# Qwen3-TTS voice cloning, also inside talkies-cuda as of v0.4.0.
-# Sample voices `alloy`/`echo`/`fable` ship in-image; drop your own
+# New in talkies v0.6.0: NVIDIA's TensorRT-friendly ONNX export of
+# Kokoro-82M. Same weights/voices/wire-shape as kokoro-82m, served via
+# ONNXRuntime + espeak-ng G2P (no PyTorch on the hot path).
+- model_name: local-talkies-cuda-kokoro-82m-nvidia
+  litellm_params:
+    model: openai/kokoro-82m-nvidia
+    api_base: http://talkies-cuda:8000/v1
+    api_key: none
+  model_info:
+    mode: audio_speech
+
+# Qwen3-TTS voice cloning, inside talkies-cuda as of v0.4.0. Sample
+# voices `alloy`/`echo`/`fable` ship in-image; drop your own
 # `<name>.wav` into ${DATA_DIR_TALKIES}/custom-voices/ on the host and
 # use `voice=<name>` (nested paths e.g. `clients/acme/jane` supported).
 - model_name: local-talkies-cuda-qwen3-tts
   litellm_params:
     model: openai/qwen3-tts-0.6b
+    api_base: http://talkies-cuda:8000/v1
+    api_key: none
+  model_info:
+    mode: audio_speech
+
+# Qwen3-TTS v0.8.0 mode coverage. Mode is implicit in the model slug;
+# `voice` and `instructions` semantics shift per mode:
+#   1.7b           — Base voice cloning (reference-WAV path as `voice`)
+#   0.6b-custom    — CustomVoice (9 preset speakers as `voice`)
+#   1.7b-custom    — CustomVoice + emotion as `instructions`
+#   1.7b-design    — VoiceDesign (NL description as `instructions`)
+# GET /v1/audio/voices returns the right shape per mode.
+- model_name: local-talkies-cuda-qwen3-tts-1.7b
+  litellm_params:
+    model: openai/qwen3-tts-1.7b
+    api_base: http://talkies-cuda:8000/v1
+    api_key: none
+  model_info:
+    mode: audio_speech
+
+- model_name: local-talkies-cuda-qwen3-tts-0.6b-custom
+  litellm_params:
+    model: openai/qwen3-tts-0.6b-custom
+    api_base: http://talkies-cuda:8000/v1
+    api_key: none
+  model_info:
+    mode: audio_speech
+
+- model_name: local-talkies-cuda-qwen3-tts-1.7b-custom
+  litellm_params:
+    model: openai/qwen3-tts-1.7b-custom
+    api_base: http://talkies-cuda:8000/v1
+    api_key: none
+  model_info:
+    mode: audio_speech
+
+- model_name: local-talkies-cuda-qwen3-tts-1.7b-design
+  litellm_params:
+    model: openai/qwen3-tts-1.7b-design
     api_base: http://talkies-cuda:8000/v1
     api_key: none
   model_info:

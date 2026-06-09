@@ -2,6 +2,71 @@
 
 All notable changes to this project are documented here.
 
+## [v3.8.0] — 2026-06-09
+
+Bump audiolla **v1.0.3 → v1.0.5** (both CPU and CUDA) and talkies **v0.5.0 → v0.9.0** (both CPU and CUDA). Both jumps add user-visible engines on the upstream side, so the LiteLLM provider configs grow nine new model entries (no MCP-side changes — talkies is non-MCP).
+
+### audiolla v1.0.3 → v1.0.5
+
+Patch-level — no API changes. Both upstream releases are pure additive / bugfix:
+
+- **v1.0.4** — `/v1/audio/enhance/deepfilter` no longer 400s on the first call after boot. The `is_deepfilter_engine` predicate AND'd `hasattr(engine, '_df_state')`, but `_df_state` is set lazily inside `_load_sync` on first inference, so the handler rejected the request before the engine could load. Predicate now checks only the public `enhance` method. Plus a structured-logging rewrite — single `audiolla.logging.configure()` init path, line-delimited JSON, `LOG_LEVEL` env var, `X-Request-Id` correlation both directions, per-request summary level-scaled to status code (DEBUG `/healthz`, INFO 2xx/3xx, WARN 4xx, ERROR 5xx).
+- **v1.0.5** — UVR `_STEM_RE` regex updated for the newer `audio-separator` filename format, plus a phantom-output filter (model reports files it never wrote — pre-fix the wrapper returned "model produced no output files" even when separation succeeded). DeepFilterNet runtime needs `git` on PATH. `Dockerfile.cuda` was missing `COPY presets`. Pyannote test now accepts `num_speakers == 0` on synthetic input. 25/25 engines now log inference start / done with size + duration_ms + warn / exception on every raise. Replaces 71 bash `e2e_*.sh` with 83 pytest files (479 functions); CUDA suite 470 passed, 9 skipped.
+
+### talkies v0.5.0 → v0.9.0
+
+Four minor versions, all wire-compatible with v0.5.0 — no breaking changes. New engines:
+
+- **v0.6.0** — New TTS slug `kokoro-82m-nvidia` (NVIDIA's TensorRT-friendly ONNX export of Kokoro-82M, Apache-2.0). Same 40-voice catalog, same wire shape, served via ONNXRuntime against the ONNX export + espeak-ng G2P. No PyTorch on the inference hot path. Plus `instructions` field for Qwen3-TTS — passed through to `faster-qwen3-tts` as `instruct`. Voices without a sibling `.txt` transcript now fall back to x-vector-only mode (with a warning) instead of returning 400. Integration test harness self-spawns its own `--rm --gpus all` container per test file.
+- **v0.7.0** — PCM streaming for Qwen3-TTS. `response_format="pcm"` against a `qwen3_tts` model now streams the raw PCM body via HTTP/1.1 chunked transfer-encoding instead of buffering the full utterance. First-audio latency drops from ~3-8 s to ~200-700 ms. New env var `TALKIES_QWEN3_STREAM_CHUNK_SIZE` (default 8) controls codec-steps-per-chunk. Plus a supply-chain bump-on-mutation Makefile workflow (`pkg-*` targets call `scripts/bump_exclude_newer.sh` before any uv operation).
+- **v0.8.0** — Full Qwen3-TTS mode coverage. Four new model slugs covering all three upstream operational modes:
+
+  | Slug | Mode | `voice` semantics | `instructions` semantics |
+  |---|---|---|---|
+  | `qwen3-tts-1.7b` | Base 1.7B voice cloning | reference-WAV path | (unused) |
+  | `qwen3-tts-0.6b-custom` | CustomVoice 0.6B | 9 preset speakers (Vivian / Serena / Uncle_Fu / Dylan / Eric / Ryan / Aiden / Ono_Anna / Sohee) | (unused) |
+  | `qwen3-tts-1.7b-custom` | CustomVoice 1.7B + emotion | same 9 preset speakers | emotion string ("happy" / "sad" / …) |
+  | `qwen3-tts-1.7b-design` | VoiceDesign 1.7B | sentinel `"design"` | natural-language description ("a young energetic female voice") |
+
+  Mode is implicit in the model slug; the OpenAI wire format stays pure. Per-request sampling controls as OpenAI extras (`temperature`, `top_k`, `top_p`, `repetition_penalty`, `max_new_tokens`, `do_sample`, `language`) via `extra_body` on official OpenAI SDKs; out-of-range returns 422.
+- **v0.9.0** — New multilingual ASR via `mudler/parakeet.cpp` (C++17 / ggml). First slug shipped: `nemotron-3.5-asr-0.6b` (NVIDIA Nemotron-3.5-ASR-Streaming-0.6B, OpenMDW-1.1, 40+ locales, WER-0 against NeMo). Runs CPU-only in both images at this stage; returns per-word timestamps + confidence and synthesises Whisper-style segments via silence-gap grouping so `verbose_json` matches OpenAI's shape. Plus a latent v0.8.0 GPU drain barrier bugfix — sibling eviction returned before async CUDA dealloc finished, so the next backend's load could race the still-freeing pool and OOM on a tight GPU.
+
+### Files
+
+- `docker-compose.yml`: image pins bumped — `psyb0t/audiolla:v1.0.3` → `v1.0.5`, `v1.0.3-cuda` → `v1.0.5-cuda`, `psyb0t/talkies:v0.5.0` → `v0.9.0`, `v0.5.0-cuda` → `v0.9.0-cuda`. Comment line above each talkies block updated to match.
+- `litellm/config/providers/talkies.yaml`: two new entries.
+  - `local-talkies-nemotron-3.5-asr-0.6b` (audio_transcription)
+  - `local-talkies-kokoro-82m-nvidia` (audio_speech)
+- `litellm/config/providers/talkies-cuda.yaml`: seven new entries.
+  - `local-talkies-cuda-nemotron-3.5-asr-0.6b` (audio_transcription)
+  - `local-talkies-cuda-kokoro-82m-nvidia` (audio_speech — ONNXRuntime variant of kokoro-82m)
+  - `local-talkies-cuda-qwen3-tts-1.7b` (audio_speech — Base mode)
+  - `local-talkies-cuda-qwen3-tts-0.6b-custom` (audio_speech — CustomVoice 9-preset)
+  - `local-talkies-cuda-qwen3-tts-1.7b-custom` (audio_speech — CustomVoice + emotion)
+  - `local-talkies-cuda-qwen3-tts-1.7b-design` (audio_speech — VoiceDesign)
+  - The pre-existing `local-talkies-cuda-qwen3-tts` (= `qwen3-tts-0.6b`) is preserved unchanged for backward compatibility.
+
+### End-to-end smoke-test against the live aigate stack
+
+All four containers came up healthy on the new pins. The new model entries were verified through the LiteLLM-routed HTTP endpoints (not direct container ports) so the full request path — LiteLLM router → talkies backend → engine — is exercised:
+
+| Model | Endpoint | Result |
+|---|---|---|
+| `local-talkies-whisper-large-v3-turbo` (existing, regression check) | `/v1/audio/transcriptions` | 200 — "You are just a line of code." |
+| `local-talkies-nemotron-3.5-asr-0.6b` (NEW) | `/v1/audio/transcriptions` | 200 — same text + word-level timestamps + `verbose_json` shape |
+| `local-talkies-cuda-nemotron-3.5-asr-0.6b` (NEW) | `/v1/audio/transcriptions` | 200 — same |
+| `local-talkies-kokoro-tts` (existing, regression check) | `/v1/audio/speech` | 200, 120 KB WAV |
+| `local-talkies-kokoro-82m-nvidia` (NEW) | `/v1/audio/speech` | 200, 101 KB WAV |
+| `local-talkies-cuda-kokoro-82m-nvidia` (NEW) | `/v1/audio/speech` | 200, 114 KB WAV |
+| `local-talkies-cuda-qwen3-tts-1.7b` (NEW Base) | `/v1/audio/speech` voice=`alloy` | 200, 100 KB WAV |
+| `local-talkies-cuda-qwen3-tts-0.6b-custom` (NEW) | `/v1/audio/speech` voice=`Vivian` | 200, 54 KB WAV |
+| `local-talkies-cuda-qwen3-tts-1.7b-custom` (NEW) | `/v1/audio/speech` voice=`Vivian` instructions=`happy` | 200, 96 KB WAV |
+| `local-talkies-cuda-qwen3-tts-1.7b-design` (NEW) | `/v1/audio/speech` voice=`design` instructions=`a young energetic female voice` | 200, 65 KB WAV |
+
+### One first-boot snag worth knowing about
+
+When the CPU `talkies` container does its first prefetch of `kokoro-82m-nvidia`, the HF CDN connection can hang in `CLOSE_WAIT` partway through the 21-file snapshot — leaving the on-disk dir half-populated (large `.onnx` file present, smaller files like `voices.txt` / `phone-zh.fst` / `.gitattributes` missing). On the next container start, the entrypoint sees the non-empty dir, prints `cached: kokoro-82m-nvidia`, and moves on — but the model load then fails at runtime with `503 no voices found in /data/models/kokoro-82m-nvidia/voices.txt — snapshot may not have been prefetched`. Fix: `docker exec --user root aigate-talkies-1 rm -rf /data/models/kokoro-82m-nvidia` and restart the service; the retry pulled all 21 files in 11 s.
+
 ## [v3.7.1] — 2026-06-08
 
 Bump audiolla v1.0.1 → **v1.0.3**. Upstream shipped two patch releases that fix the exact issues that surfaced while smoke-testing v3.7.0's text-to-audio generators against the live aigate stack:

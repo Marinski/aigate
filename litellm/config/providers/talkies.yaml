@@ -22,11 +22,33 @@
   model_info:
     mode: audio_transcription
 
+# New in talkies v0.9.0: multilingual ASR via parakeet.cpp (NVIDIA
+# Nemotron-3.5-ASR-Streaming-0.6B, OpenMDW-1.1, 40+ locales). Runs
+# CPU-only in both images.
+- model_name: local-talkies-nemotron-3.5-asr-0.6b
+  litellm_params:
+    model: openai/nemotron-3.5-asr-0.6b
+    api_base: http://talkies:8000/v1
+    api_key: none
+  model_info:
+    mode: audio_transcription
+
 # Kokoro TTS lives inside the same talkies container as of v0.3.0 —
 # `POST /v1/audio/speech` routed to the same upstream.
 - model_name: local-talkies-kokoro-tts
   litellm_params:
     model: openai/kokoro-82m
+    api_base: http://talkies:8000/v1
+    api_key: none
+  model_info:
+    mode: audio_speech
+
+# New in talkies v0.6.0: NVIDIA's TensorRT-friendly ONNX export of
+# Kokoro-82M. Same weights/voices/wire-shape as kokoro-82m, served via
+# ONNXRuntime + espeak-ng G2P (no PyTorch on the hot path).
+- model_name: local-talkies-kokoro-82m-nvidia
+  litellm_params:
+    model: openai/kokoro-82m-nvidia
     api_base: http://talkies:8000/v1
     api_key: none
   model_info:

@@ -267,7 +267,7 @@ services:
   # Upstream: github.com/psyb0t/docker-audiolla.
   audiolla:
     profiles: ["audiolla"]
-    image: psyb0t/audiolla:v1.0.3
+    image: psyb0t/audiolla:v1.0.5
     restart: unless-stopped
     mem_limit: ${AUDIOLLA_MEM_LIMIT:-8g}
     memswap_limit: ${AUDIOLLA_MEMSWAP_LIMIT:-16g}
@@ -309,7 +309,7 @@ services:
 
   audiolla-cuda:
     profiles: ["audiolla-cuda"]
-    image: psyb0t/audiolla:v1.0.3-cuda
+    image: psyb0t/audiolla:v1.0.5-cuda
     restart: unless-stopped
     mem_limit: ${AUDIOLLA_CUDA_MEM_LIMIT:-12g}
     memswap_limit: ${AUDIOLLA_CUDA_MEMSWAP_LIMIT:-24g}
@@ -503,11 +503,11 @@ services:
   # External image: github.com/psyb0t/docker-talkies. One container,
   # both endpoints: /v1/audio/transcriptions (whisper + canary-180m) and
   # /v1/audio/speech (Kokoro-82M TTS). CPU variant doesn't ship Qwen3-TTS
-  # (CUDA-only model). Pinned to v0.5.0.
+  # (CUDA-only model). Pinned to v0.9.0.
 
   talkies:
     profiles: ["talkies"]
-    image: psyb0t/talkies:v0.5.0
+    image: psyb0t/talkies:v0.9.0
     restart: unless-stopped
     mem_limit: ${TALKIES_MEM_LIMIT:-8g}
     memswap_limit: ${TALKIES_MEMSWAP_LIMIT:-16g}
@@ -545,11 +545,11 @@ services:
   # SALM), Kokoro-82M TTS (CPU-served), and Qwen3-TTS-0.6B (CUDA-only voice
   # cloning, 17 languages). Drop reference .wav files into
   # ${DATA_DIR_TALKIES}/custom-voices/ to make them selectable as
-  # `voice=<filename-without-ext>`. Pinned to v0.5.0-cuda.
+  # `voice=<filename-without-ext>`. Pinned to v0.9.0-cuda.
 
   talkies-cuda:
     profiles: ["talkies-cuda"]
-    image: psyb0t/talkies:v0.5.0-cuda
+    image: psyb0t/talkies:v0.9.0-cuda
     restart: unless-stopped
     mem_limit: ${TALKIES_CUDA_MEM_LIMIT:-12g}
     memswap_limit: ${TALKIES_CUDA_MEMSWAP_LIMIT:-24g}
