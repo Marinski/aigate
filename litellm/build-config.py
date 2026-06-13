@@ -98,6 +98,8 @@ def active_providers(env):
         ("sdcpp-cuda",     lambda e: is_flag(e, "SDCPP_CUDA")),
         ("vllm",           lambda e: is_flag(e, "VLLM")),
         ("vllm-cuda",      lambda e: is_flag(e, "VLLM_CUDA")),
+        ("llamacpp",       lambda e: is_flag(e, "LLAMACPP")),
+        ("llamacpp-cuda",  lambda e: is_flag(e, "LLAMACPP_CUDA")),
     ]
     return [name for name, check in checks if check(env)]
 

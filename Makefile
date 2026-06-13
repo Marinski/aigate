@@ -118,6 +118,16 @@ ifeq ($(strip $(VLLM_CUDA)),1)
   _PROFILES += vllm-cuda
 endif
 
+# llama.cpp (CPU): opt-in with LLAMACPP=1
+ifeq ($(strip $(LLAMACPP)),1)
+  _PROFILES += llamacpp
+endif
+
+# llama.cpp CUDA: opt-in with LLAMACPP_CUDA=1
+ifeq ($(strip $(LLAMACPP_CUDA)),1)
+  _PROFILES += llamacpp-cuda
+endif
+
 # mailbox: opt-in with MAILBOX=1
 ifeq ($(strip $(MAILBOX)),1)
   _PROFILES += mailbox

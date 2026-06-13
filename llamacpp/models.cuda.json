@@ -1,0 +1,16 @@
+{
+  "models": {
+    "surya-ocr-2": {
+      "repo": "datalab-to/surya-ocr-2-gguf",
+      "revision": "6a3a4c30e5e74446d4f8b6afd05b2f2da970f470",
+      "gguf_file": "surya-2.gguf",
+      "mmproj_file": "surya-2-mmproj.gguf",
+      "llama_server_args": [
+        "--ctx-size", "16384",
+        "--parallel", "4",
+        "--n-gpu-layers", "999"
+      ],
+      "endpoints": ["chat"]
+    }
+  }
+}

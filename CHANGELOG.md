@@ -2,6 +2,41 @@
 
 All notable changes to this project are documented here.
 
+## [v3.9.0] — 2026-06-13
+
+New service: **`llamacpp` / `llamacpp-cuda`** — a supervised `llama-server` wrapper that mirrors the `vllm-wrap` lifecycle surface (`/v1/chat/completions`, `/v1/completions`, `/v1/embeddings`, `/api/ps`, `DELETE /api/ps/{model_id}`, `POST /unload`) but serves GGUF weights and **supports vision models via `mmproj`**. First model shipped: **Surya OCR 2** (`datalab-to/surya-ocr-2-gguf`), Qwen3-VL-style ~650M-param document model — does OCR / layout / table-recognition through one VLM.
+
+Why a second backend (vs just adding to `vllm-wrap`): vllm-CPU's vision-VLM support is weak, and even on GPU the Surya GGUF is the upstream-blessed inference target. llama.cpp does Qwen3-VL-class models cleanly on both CPU and GPU.
+
+### What's new
+
+- **Two wrapper services** — `llamacpp` (CPU, `LLAMACPP=1`) and `llamacpp-cuda` (NVIDIA, `LLAMACPP_CUDA=1`). Base images pinned by digest: `ghcr.io/ggml-org/llama.cpp:server@sha256:7d02b045...` and `:server-cuda@sha256:841b199a...` (upstream build `b9603`, rev `ba1df050f3dc78...`). Lazy load on first request, idle TTL unload, single-resident-model-at-a-time enforced by a Python supervisor (~750 LOC, mirrors `vllm-wrap` 1-for-1).
+- **`llamacpp-pull` sidecar** — runs once per stack-up, downloads every HF repo referenced by `llamacpp/models.{cpu,cuda}.json` (union) via `huggingface-cli download --local-dir` so weights live on disk in the flat `models/<org>/<repo>/<files>` layout (real files, no blobs/snapshots dedup — other services can bind-mount the same store and load weights directly). The wrapper containers `depends_on: condition: service_completed_successfully`. The wrapper itself runs with `HF_HUB_OFFLINE=1` so it never touches the network at runtime.
+- **First model: Surya OCR 2** (`datalab-to/surya-ocr-2-gguf`, revision `6a3a4c30e5e74...`). Pulls the main GGUF + the vision projector (`surya-2-mmproj.gguf`) + tokenizer/chat-template/config files. CPU registry pins `--n-gpu-layers 0`; CUDA registry pins `--n-gpu-layers 999`.
+- **HTTP-URL → data-URL rewriting in the wrapper proxy.** `llama-server`'s `mtmd` vision pipeline accepts `data:` URLs only — it does NOT fetch `http(s)://` URLs from the OpenAI `image_url.url` field. The wrapper transparently fetches any `http(s)://` URL, base64-encodes the body, and rewrites the field in place before forwarding. 32 MB cap per image, 30 s fetch timeout, follow_redirects on. Pure data URLs and anything else pass through untouched.
+
+### LiteLLM wiring
+
+- New provider files:
+  - `litellm/config/providers/llamacpp.yaml` → `local-llamacpp-surya-ocr-2` (chat mode)
+  - `litellm/config/providers/llamacpp-cuda.yaml` → `local-llamacpp-cuda-surya-ocr-2` (chat mode)
+- `litellm/build-config.py` — new active-provider entries `("llamacpp", ...)` and `("llamacpp-cuda", ...)`.
+- `litellm/callbacks/resource_manager.py` — two new resource groups, `cpu-llamacpp` and `cuda-llamacpp`. Prefix matching is order-sensitive (CUDA prefix checked before CPU since `local-llamacpp-cuda-` is a strict superset of `local-llamacpp-`). Sibling eviction now covers the new groups — when something else needs the GPU (LLM / image gen / TTS / ASR / vllm-cuda chat), llamacpp-cuda gets `DELETE /api/ps/surya-ocr-2` first.
+
+### Wire-up + ops
+
+- `docker-compose.yml` — 3 new service blocks. Shape mirrors `vllm` / `vllm-cuda` / `vllm-pull` exactly (same env-var pattern, same healthcheck, same volume layout, same network membership). New env vars: `LLAMACPP_WRAP_*` (inside containers) and operator-facing `LLAMACPP_*` / `LLAMACPP_CUDA_*` (TTL / sweeper interval / load timeout / request timeout / log level / preload). New data-dir override: `DATA_DIR_LLAMACPP` (defaults to `${DATA_DIR}/llamacpp`).
+- `Makefile` — `LLAMACPP=1` / `LLAMACPP_CUDA=1` profile autodetect blocks added next to the `VLLM=` / `VLLM_CUDA=` ones.
+- `.env.example` — full new section documenting both flags + every tuning knob + `DATA_DIR_LLAMACPP` with the "flat HF-repo layout shared between CPU + CUDA variants" rationale.
+
+### Tests
+
+- `tests/test_llamacpp.sh` — 8 new test cases (4 per variant): `models_list`, `captcha_ocr` (data: URL path), `pdf_ocr` (PDF rasterized via `pdftoppm`, full-page prompt), `url_captcha` (full hybrids3 upload → presign → URL fetch by wrapper → cleanup lifecycle). All 8 verified passing end-to-end through the LiteLLM router → wrapper supervisor → `llama-server` → GGUF VLM path.
+- Two new fixtures:
+  - `tests/.fixtures/captcha.png` — 400×120 PNG with the literal text `AIGATE2026` rendered with mild captcha-style distortion (per-glyph jitter, sparse speckle, two light line-strokes). 18 KB.
+  - `tests/.fixtures/doc.pdf` — A4, 2 lines of known prose (`The quick brown fox jumps over the lazy dog.` + `Surya OCR fixture line two: 0123456789.`). 1 KB.
+- **Surya prompts are training-time contracts** — the test passes the exact upstream strings (`OCR this block image to HTML.` for crops; `OCR this image to HTML. Each block is a div with data-label and data-bbox (x0 y0 x1 y1, normalized 0-1000).` for full pages). Paraphrasing flips the output mode (the model emits a layout-JSON instead of OCR-HTML when given a generic "transcribe this" prompt).
+
 ## [v3.8.1] — 2026-06-09
 
 Docs-only sync for v3.8.0. No behaviour change, no image-pin change, no LiteLLM config change. The v3.8.0 commit shipped the actual code change (audiolla v1.0.5, talkies v0.9.0, nine new LiteLLM model entries) but left the prose docs pinned to the older talkies versions / older model lists. This release pulls the docs forward.

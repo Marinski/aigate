@@ -1,0 +1,19 @@
+# llamacpp CPU — GGUF VLM serving via supervised `llama-server`. Only one
+# model is resident in RAM at a time — the wrapper restarts llama-server
+# when switching. The LiteLLM resource_manager evicts llamacpp whenever a
+# competing CPU job (ollama / sdcpp / talkies-cpu / vllm) arrives.
+
+# ── Surya OCR 2 (Qwen3-VL-style, ~650M, document OCR / layout / table-rec) ──
+# Surya's Python client lib (`surya-ocr` pip package) sends OpenAI vision
+# chat completions to whatever endpoint SURYA_INFERENCE_URL points at — set
+# that to http://<aigate>:4000/v1 and SURYA_INFERENCE_MODEL to this slug,
+# and the surya_ocr / surya_layout / surya_table CLIs work end-to-end
+# without any aigate-side wrapper.
+
+- model_name: local-llamacpp-surya-ocr-2
+  litellm_params:
+    model: openai/surya-ocr-2
+    api_base: http://llamacpp:8000/v1
+    api_key: none
+  model_info:
+    mode: chat

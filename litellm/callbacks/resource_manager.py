@@ -13,12 +13,14 @@ Groups (CUDA):
   cuda-img          : local-sdcpp-cuda-* (sd.cpp image generation)
   cuda-stt-talkies  : local-talkies-cuda-*  (ASR + Kokoro TTS + Qwen3-TTS)
   cuda-vllm         : local-vllm-cuda-*  (text LLMs + embeddings via vllm serve)
+  cuda-llamacpp     : local-llamacpp-cuda-*  (vision-VLM serving via llama-server + mmproj)
 
 Groups (CPU):
   cpu-llm           : local-ollama-cpu-* models   (unload frees RAM)
   cpu-img           : local-sdcpp-cpu-* (sd.cpp image generation)
   cpu-stt-talkies   : local-talkies-*
   cpu-vllm          : local-vllm-*  (text LLMs + embeddings via vllm serve)
+  cpu-llamacpp      : local-llamacpp-*  (vision-VLM serving via llama-server + mmproj)
 
 Each group is unloaded before a request lands on a competing group (so
 qwen3-tts frees VRAM before talkies-cuda needs it, etc.). Within a service,
@@ -64,17 +66,24 @@ _TALKIES_CPU_PREFIX = "local-talkies-"
 _VLLM_CUDA_PREFIX = "local-vllm-cuda-"
 _VLLM_CPU_PREFIX = "local-vllm-"
 
+# llamacpp — supervised single-model llama-server (vision-VLM serving via
+# mmproj). Same prefix-checking caveat as vllm.
+_LLAMACPP_CUDA_PREFIX = "local-llamacpp-cuda-"
+_LLAMACPP_CPU_PREFIX = "local-llamacpp-"
+
 _ALL_CUDA_GROUPS = {
     "cuda-llm",
     "cuda-img",
     "cuda-stt-talkies",
     "cuda-vllm",
+    "cuda-llamacpp",
 }
 _ALL_CPU_GROUPS = {
     "cpu-llm",
     "cpu-img",
     "cpu-stt-talkies",
     "cpu-vllm",
+    "cpu-llamacpp",
 }
 
 
@@ -96,6 +105,11 @@ def _get_group(model: str) -> Optional[str]:
         return "cuda-vllm"
     if model.startswith(_VLLM_CPU_PREFIX):
         return "cpu-vllm"
+    # llamacpp CUDA must be checked before CPU (longer prefix wins)
+    if model.startswith(_LLAMACPP_CUDA_PREFIX):
+        return "cuda-llamacpp"
+    if model.startswith(_LLAMACPP_CPU_PREFIX):
+        return "cpu-llamacpp"
     return None
 
 
@@ -276,15 +290,44 @@ async def _unload_cpu_vllm():
     )
 
 
+# llamacpp — same /api/ps surface as vllm + talkies. Wrapper enforces only-one
+# -model resident internally; this just nudges it to free RAM/VRAM when
+# something else needs the hardware. Model IDs must match the wrapper's
+# models.{cpu,cuda}.json slugs.
+_LLAMACPP_CUDA_URL = "http://llamacpp-cuda:8000"
+_LLAMACPP_CPU_URL = "http://llamacpp:8000"
+_LLAMACPP_MODELS = [
+    "surya-ocr-2",
+]
+
+
+async def _unload_cuda_llamacpp():
+    """Unload CUDA llamacpp models to free VRAM."""
+    logger.warning("[resource_manager] unloading cuda-llamacpp models")
+    await _unload_via_api_ps(
+        _LLAMACPP_CUDA_URL, "cuda-llamacpp", _LLAMACPP_MODELS
+    )
+
+
+async def _unload_cpu_llamacpp():
+    """Unload CPU llamacpp models to free RAM."""
+    logger.warning("[resource_manager] unloading cpu-llamacpp models")
+    await _unload_via_api_ps(
+        _LLAMACPP_CPU_URL, "cpu-llamacpp", _LLAMACPP_MODELS
+    )
+
+
 _UNLOAD_FNS = {
     "cuda-llm": _unload_cuda_llm,
     "cuda-img": _unload_cuda_img,
     "cuda-stt-talkies": _unload_cuda_stt_talkies,
     "cuda-vllm": _unload_cuda_vllm,
+    "cuda-llamacpp": _unload_cuda_llamacpp,
     "cpu-llm": _unload_cpu_llm,
     "cpu-img": _unload_cpu_img,
     "cpu-stt-talkies": _unload_cpu_stt_talkies,
     "cpu-vllm": _unload_cpu_vllm,
+    "cpu-llamacpp": _unload_cpu_llamacpp,
 }
 
 # ---------------------------------------------------------------------------

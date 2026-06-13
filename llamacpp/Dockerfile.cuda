@@ -1,0 +1,72 @@
+# syntax=docker/dockerfile:1.7
+#
+# CUDA image — llama.cpp's official CUDA server base + our Python wrapper.
+#
+# The wrapper supervises a single `llama-server` subprocess at a time and
+# proxies /v1/chat/completions, /v1/completions, and /v1/embeddings.
+# Only one model is resident in VRAM at any moment — switching models means
+# restarting the subprocess. Idle TTL kills the subprocess after
+# LLAMACPP_WRAP_MODEL_TTL seconds without traffic; LiteLLM resource_manager
+# can also unload via DELETE /api/ps/{model_id} to free VRAM for other CUDA
+# services (ollama / sdcpp / talkies / vllm).
+#
+# Models served are declared in models.json (mounted or baked).
+
+# Pinned by digest. Tag at build time: ghcr.io/ggml-org/llama.cpp:server-cuda
+# (b9603). Rev: ba1df050f3dc7827fc64936b2e24fe499c9f74eb. ENTRYPOINT is
+# /app/llama-server.
+FROM ghcr.io/ggml-org/llama.cpp:server-cuda@sha256:841b199aed2649a748875b043b32fed2e8c2d4d87e1d563556817fb7fa44b72b AS runtime
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    TZ=UTC \
+    LLAMACPP_WRAP_HOST=0.0.0.0 \
+    LLAMACPP_WRAP_PORT=8000 \
+    LLAMACPP_WRAP_SUBPROCESS_PORT=18000 \
+    LLAMACPP_WRAP_MODELS_FILE=/app/models.json \
+    LLAMACPP_WRAP_DATA_DIR=/data \
+    LLAMACPP_WRAP_DEVICE=cuda \
+    LLAMACPP_WRAP_SERVER_BIN=/app/llama-server \
+    HF_HOME=/data/hf \
+    HF_HUB_OFFLINE=1 \
+    DEBIAN_FRONTEND=noninteractive
+
+USER root
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        python3 \
+        python3-pip \
+        python3-venv \
+        ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN (userdel -r ubuntu 2>/dev/null || true) \
+    && useradd -u 1000 --create-home --shell /bin/bash llamauser \
+    && mkdir -p /data \
+    && chown llamauser:llamauser /data
+
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --break-system-packages \
+        "fastapi==0.136.1" \
+        "uvicorn==0.47.0" \
+        "pydantic==2.13.4" \
+        "httpx==0.28.1"
+
+WORKDIR /app
+
+COPY --chown=llamauser:llamauser src ./src
+COPY --chown=llamauser:llamauser pyproject.toml ./
+COPY --chown=llamauser:llamauser models.cuda.json /app/models.json
+COPY --chown=llamauser:llamauser entrypoint.sh /usr/local/bin/llamacpp-entrypoint
+RUN chmod +x /usr/local/bin/llamacpp-entrypoint \
+    && pip install --break-system-packages -e /app
+
+USER llamauser
+
+EXPOSE 8000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+    CMD python3 -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz').status==200 else 1)" || exit 1
+
+ENTRYPOINT ["/usr/local/bin/llamacpp-entrypoint"]

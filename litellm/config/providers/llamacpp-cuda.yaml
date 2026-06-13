@@ -1,0 +1,13 @@
+# llamacpp CUDA — same wrapper as llamacpp (CPU), but with NVIDIA GPU
+# offload (`--n-gpu-layers 999`). Pick this slug for low-latency OCR work;
+# the CPU slug is fine for batch / small-volume use. Both share the same
+# weight store under ${DATA_DIR_LLAMACPP}/models/<repo>/ — enabling both
+# variants does not duplicate downloads.
+
+- model_name: local-llamacpp-cuda-surya-ocr-2
+  litellm_params:
+    model: openai/surya-ocr-2
+    api_base: http://llamacpp-cuda:8000/v1
+    api_key: none
+  model_info:
+    mode: chat
