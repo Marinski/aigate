@@ -2,6 +2,56 @@
 
 All notable changes to this project are documented here.
 
+## [v3.9.1] — 2026-06-13
+
+Follow-up to v3.9.0 — exercises and documents the two Surya OCR 2 modes the original release shipped but did not test (layout detection + table recognition), drops the test runner's PDF DPI to Surya's training-time default, and adds full Surya usage docs across README + `docs/services-reference.md` + `docs/usage.md` + `docs/providers.md`.
+
+No production code changes — the `llamacpp/` wrapper, model registries, compose services, LiteLLM provider configs, and resource_manager wiring are byte-identical to v3.9.0. Pure tests + docs work.
+
+### Tests — 8 → 12 cases (covers all 4 Surya prompt modes now)
+
+- `tests/test_llamacpp.sh` — added 4 new test cases (2 per variant): `layout` (asserts non-empty JSON array of `{label, ...}` objects, surfaces the first label) and `table_rec` (asserts ≥1 `Row` + ≥1 `Col` label entry in the JSON response).
+- New `_llamacpp_ocr_call` `task=block|page|layout|table_rec` dispatcher selects the right verbatim Surya prompt string per task — adding a future 5th mode is a one-line case-statement extension.
+- All four trained-in upstream prompts are now exercised at test time:
+  - block OCR — `OCR this block image to HTML.`
+  - full-page OCR — `OCR this image to HTML. Each block is a div with data-label and data-bbox (x0 y0 x1 y1, normalized 0-1000).`
+  - layout detection — `Output the layout of this image as JSON. Each entry is a dict with "label", "bbox", and "count" fields. Bbox is x0 y0 x1 y1, normalized 0-1000.`
+  - table recognition — `Output the table rows then columns as JSON. Each entry is a dict with "label" ("Row" or "Col") and "bbox" (x0 y0 x1 y1, normalized 0-1000).`
+
+### New fixture — `tests/.fixtures/table.pdf`
+
+A4, 3-row × 3-col bordered table (City / Country / Population). 1.4 KB. Generated reproducibly via fpdf2 — see `_llamacpp_test_table_rec` for the rasterization + assertion logic.
+
+### PDF rasterization DPI — 200 → 96
+
+The v3.9.0 test runner rasterized PDFs at 200 DPI via `pdftoppm -r 200`. The vision encoder's token count scales ~quadratically with image area, so 200 DPI produces ~3940 prompt tokens per A4 page versus ~1100 at 96 DPI — and CPU encode time blew up to ~7+ min per page accordingly. 96 DPI is Surya's training-time default; lowering to it gave a ~4× speedup with **no quality loss** on the synthetic fixtures (`pdf_ocr` still asserts `quick brown fox`; `layout` still surfaces a valid label; `table_rec` still finds Row + Col labels). Going below 96 DPI starts breaking small text recognition — keep `-r 96` as the floor.
+
+### Throughput — what to actually expect, measured
+
+Measured end-to-end through LiteLLM → wrapper → `llama-server` on the actual test fixtures (single RTX-class GPU + 4-core CPU container):
+
+| Task | CUDA | CPU |
+|---|---|---|
+| Captcha OCR (400×120) | ~3 s | ~24 s |
+| URL-fetched captcha (hybrids3 → wrapper fetch) | ~3 s | ~24 s |
+| Full-page OCR (A4 @ 96 DPI, ~1100 tokens) | ~6-12 s | ~2-3 min |
+| Layout detection (A4 @ 96 DPI) | ~5-10 s | ~2 min |
+| Table recognition (table PDF @ 96 DPI) | ~3-6 s | ~2 min |
+
+CPU is fine for batch / overnight document processing and for small images (captchas, signature crops, single-line clips). Interactive A4-page work needs CUDA.
+
+### Docs — full Surya usage section across 4 files
+
+- `README.md` — service-overview rows for both llamacpp variants now mention the **4 trained-in prompts** and the **per-hardware performance reality** ("~3 s CUDA / ~24 s CPU" for small images; "~6-12 s CUDA / ~2-3 min CPU" for A4 pages).
+- `docs/services-reference.md` — full new "llamacpp / llamacpp-cuda" section after the vllm section. Includes:
+  - "Default model — Surya OCR 2" with a 4-row table of the verbatim training-time prompts and their output shapes (block OCR / full-page OCR / layout detection / table recognition).
+  - "Image input — data URLs OR http(s)" — documents the wrapper's URL-fetch path, the 32 MB / 30 s safety bounds, redirect follow behaviour, and the data: pass-through.
+  - "Throughput — what to expect" with per-hardware (CUDA + CPU) per-task wall-clock tables and a "DPI sweet spot" subsection.
+  - "Configuration" with every `LLAMACPP_*` / `LLAMACPP_CUDA_*` tunable.
+  - "Adding a new model" 4-step recipe (edit JSON → bring stack up → LiteLLM provider entry → resource_manager group if needed).
+- `docs/usage.md` — full new "Document OCR (Surya 2 via llamacpp)" section after the embeddings examples. Includes **4 worked curl examples** — one per Surya prompt mode — with the exact JSON / HTML output shape inline. Plus a "which slug should I pick" picker table, a PDF rasterization recipe at 96 DPI, and a pointer to the upstream `surya-ocr` Python lib as an alternative orchestration layer.
+- `docs/providers.md` — 2 new tables (CPU + CUDA) with the 4 prompt strings spelled out inline on the model row.
+
 ## [v3.9.0] — 2026-06-13
 
 New service: **`llamacpp` / `llamacpp-cuda`** — a supervised `llama-server` wrapper that mirrors the `vllm-wrap` lifecycle surface (`/v1/chat/completions`, `/v1/completions`, `/v1/embeddings`, `/api/ps`, `DELETE /api/ps/{model_id}`, `POST /unload`) but serves GGUF weights and **supports vision models via `mmproj`**. First model shipped: **Surya OCR 2** (`datalab-to/surya-ocr-2-gguf`), Qwen3-VL-style ~650M-param document model — does OCR / layout / table-recognition through one VLM.

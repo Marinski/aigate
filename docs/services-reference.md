@@ -465,6 +465,125 @@ Every tunable below has a CPU (`VLLM_*`) and CUDA (`VLLM_CUDA_*`) counterpart wi
 
 ---
 
+## llamacpp / llamacpp-cuda — local GGUF + vision VLMs (optional, `LLAMACPP=1` / `LLAMACPP_CUDA=1`)
+
+Sister service to `vllm` / `vllm-cuda` — same lifecycle surface (`/api/ps`, `DELETE /api/ps/{model_id}`, `POST /unload`, idle-TTL unload, single-resident-model-at-a-time enforced by the supervisor), but the underlying engine is `llama-server` from llama.cpp, the weights are GGUF, and **vision models (mmproj)** are supported. Picks the slack from vllm-wrap's weak vision support on CPU and serves any Qwen3-VL-class document model cleanly on either hardware.
+
+Base images pinned by digest: `ghcr.io/ggml-org/llama.cpp:server@sha256:7d02b045...` (CPU) and `:server-cuda@sha256:841b199a...` (CUDA), both upstream build `b9603` (rev `ba1df050f3dc78...`). Wrapper code lives in `llamacpp/src/llamacpp_wrap/` and mirrors `vllm/src/vllm_wrap/` 1-for-1.
+
+### Default model — Surya OCR 2
+
+`datalab-to/surya-ocr-2-gguf` (revision `6a3a4c30e5e74...`, ~650M params, Apache-2.0 code / modified AI Pubs Open Rail-M weights, free for research/personal/startups <$5M ARR). One VLM that handles **OCR**, **layout detection**, and **table recognition** — behaviour switches on the **prompt string**, not on the model.
+
+> **Surya prompts are training-time contracts.** Paraphrasing them produces unpredictable output mode (the model emits a layout-JSON instead of OCR-HTML when given a generic "transcribe this" prompt). Pass the literal strings below.
+
+| Task | Prompt (verbatim) | Output shape |
+| ---- | ----------------- | ------------ |
+| **Block OCR** | `OCR this block image to HTML.` | HTML for one tight crop. Use after layout-segmenting a page; equivalent to `RecognitionPredictor`'s block mode. |
+| **Full-page OCR** | `OCR this image to HTML. Each block is a div with data-label and data-bbox (x0 y0 x1 y1, normalized 0-1000).` | Whole page OCR'd in one call, blocks tagged with `data-label` + `data-bbox`. Equivalent to `RecognitionPredictor`'s default full-page mode. |
+| **Layout detection** | `Output the layout of this image as JSON. Each entry is a dict with "label", "bbox", and "count" fields. Bbox is x0 y0 x1 y1, normalized 0-1000.` | JSON array of `{label, bbox, count}` describing the reading-order-sorted blocks. Labels are the canonical Surya set: `Text`, `SectionHeader`, `Caption`, `Footnote`, `Equation`, `ListGroup`, `Picture`, `Table`, `Form`, `PageHeader`, `PageFooter`, `TableOfContents`, `Figure`, `Code`, `Bibliography`, `BlankPage`, `ChemicalBlock`, `Diagram`. |
+| **Table recognition** | `Output the table rows then columns as JSON. Each entry is a dict with "label" ("Row" or "Col") and "bbox" (x0 y0 x1 y1, normalized 0-1000).` | JSON array of `{label, bbox}` where label is `Row` or `Col`. Geometric intersections give the cells (simple mode). For full HTML (spanning cells / headers) use `TableRecPredictor.predict_full()` from the upstream Surya Python lib, pointed at our endpoint. |
+
+### Endpoints
+
+| Endpoint                                  | URL (via LiteLLM)                       | Auth                              |
+| ----------------------------------------- | --------------------------------------- | --------------------------------- |
+| Chat (OpenAI-compat, vision-capable)      | `POST /v1/chat/completions`             | `Bearer $LITELLM_MASTER_KEY`      |
+| Completions (legacy OpenAI)               | `POST /v1/completions`                  | `Bearer $LITELLM_MASTER_KEY`      |
+| Embeddings                                | `POST /v1/embeddings`                   | `Bearer $LITELLM_MASTER_KEY`      |
+| Health (internal)                         | `GET llamacpp{,-cuda}:8000/healthz`     | none                              |
+| Loaded model (internal)                   | `GET llamacpp{,-cuda}:8000/api/ps`      | none                              |
+| Unload one (internal — resource_manager)  | `DELETE llamacpp{,-cuda}:8000/api/ps/{id}` | none                            |
+| Unload all (internal)                     | `POST llamacpp{,-cuda}:8000/unload`     | none                              |
+
+LiteLLM model slugs (registered once each variant is enabled):
+
+- `LLAMACPP=1` → `local-llamacpp-surya-ocr-2`
+- `LLAMACPP_CUDA=1` → `local-llamacpp-cuda-surya-ocr-2`
+
+### Image input — data URLs OR http(s)
+
+The wrapper accepts both, and rewrites the request before forwarding to `llama-server` (which only natively accepts `data:` URLs):
+
+```jsonc
+"content": [
+  // EITHER inline base64:
+  { "type": "image_url", "image_url": { "url": "data:image/png;base64,iVBORw0K..." } },
+  // OR any http(s) URL the wrapper can reach from inside the docker network:
+  { "type": "image_url", "image_url": { "url": "https://example.com/page.png" } },
+  { "type": "image_url", "image_url": { "url": "http://hybrids3:8080/uploads/scan-1.png" } },
+  { "type": "image_url", "image_url": { "url": "http://nginx:4000/storage/uploads/scan-1.png" } },
+  { "type": "text", "text": "<one of the prompts from the table above>" }
+]
+```
+
+URL fetching is hard-capped at **32 MB / 30 s** per image, follows redirects, and trusts an explicit `image/*` Content-Type when present (falls back to the URL extension). Anything else (non-`http(s)`, non-`data:`, missing) is passed through untouched so the underlying backend's own error handling kicks in.
+
+PDFs are NOT a native input — rasterize page 1 (and beyond) to PNG client-side at **96 DPI** (Surya's training-time default; higher DPI inflates the prompt-token count quadratically without quality gain). Examples: `pdftoppm -png -r 96 -f 1 -l 1 doc.pdf out`, or `pdf2image` from Python.
+
+### Throughput — what to expect, per hardware
+
+The vision encoder runs once per image and is the dominant cost. Token count after encoding scales **roughly quadratically with image area**, so DPI choice for PDFs matters a lot on CPU. Wall-clock numbers below are measured end-to-end through the LiteLLM router → llamacpp wrapper → llama-server pipeline (real test runs, not isolated benchmarks).
+
+#### CUDA (RTX-class single-GPU)
+
+| Task | Image | Wall clock per call |
+|---|---|---|
+| Captcha OCR (block) | 400×120 PNG | ~3 s |
+| Full-page OCR | A4 page @ 96 DPI (~794×1123) | ~6-12 s |
+| Layout detection | A4 page @ 96 DPI | ~5-10 s |
+| Table recognition | Table-only crop | ~3-6 s |
+
+Suitable for interactive workloads. Idle TTL unload returns VRAM to other CUDA services (ollama / sdcpp / talkies / vllm) — first request after eviction pays the model-load cost (~5-10 s).
+
+#### CPU (4-core container, `--n-gpu-layers 0`)
+
+Measured against the actual test fixtures:
+
+| Task | Image | Wall clock per call |
+|---|---|---|
+| Captcha OCR (block) | 400×120 PNG | **~24 s** |
+| URL-fetch captcha (block) | same, fetched from hybrids3 first | **~24 s** |
+| Full-page OCR | A4 page @ 96 DPI (~794×1123, ~1100 prompt tokens) | **~2-3 min** |
+| Layout detection | A4 page @ 96 DPI | **~2 min** |
+| Table recognition | Table PDF @ 96 DPI | **~2 min** |
+| Full-page OCR | A4 page @ **200 DPI** (~1654×2339, ~3940 prompt tokens) | **~7+ min** (avoid — see below) |
+
+Suitable for **batch / overnight document processing**, sub-second small-image OCR (captchas, single-line crops). Not suitable for interactive A4-page work.
+
+#### DPI sweet spot
+
+- **96 DPI is Surya's training-time default** — going higher rarely helps text accuracy and inflates the token count quadratically.
+- **Lower than 96 DPI** starts breaking small text recognition (footnotes, dense tables, low-contrast scans).
+- For batch CPU work, stay at 96 DPI. For CUDA, 96 DPI is still preferred (faster encode, same accuracy).
+
+Both `pdftoppm` (poppler) and Python's `pdf2image.convert_from_path(..., dpi=96)` default to higher DPI — pass `-r 96` / `dpi=96` explicitly.
+
+### Configuration
+
+Every tunable below has a CPU (`LLAMACPP_*`) and CUDA (`LLAMACPP_CUDA_*`) counterpart with the same meaning and default:
+
+| Tunable | Default | Notes |
+| ------- | ------- | ----- |
+| `LLAMACPP_MODEL_TTL` / `LLAMACPP_CUDA_MODEL_TTL` | `600` | Seconds idle before `llama-server` is killed (`-1` disables) |
+| `LLAMACPP_SWEEPER_INTERVAL` / `LLAMACPP_CUDA_SWEEPER_INTERVAL` | `60` | How often the idle sweeper checks (seconds) |
+| `LLAMACPP_LOAD_TIMEOUT` / `LLAMACPP_CUDA_LOAD_TIMEOUT` | `600` | Max time to wait for `/health` after spawning `llama-server` |
+| `LLAMACPP_REQUEST_TIMEOUT` / `LLAMACPP_CUDA_REQUEST_TIMEOUT` | `300` | Per-request proxy timeout |
+| `LLAMACPP_LOG_LEVEL` / `LLAMACPP_CUDA_LOG_LEVEL` | `INFO` | Wrapper log level |
+| `LLAMACPP_PRELOAD` / `LLAMACPP_CUDA_PRELOAD` | _empty_ | Pre-spawn this model_id at boot |
+| `LLAMACPP_MEM_LIMIT` / `LLAMACPP_CUDA_MEM_LIMIT` | `12g` | Container memory limit |
+| `LLAMACPP_CPUS` / `LLAMACPP_CUDA_CPUS` | `4.0` | Container CPU limit |
+| `DATA_DIR_LLAMACPP` | `${DATA_DIR}/llamacpp` | Bind-mount root for the wrapper's `/data` dir. Holds the flat HF-repo layout under `models/<org>/<repo>/<files>` (no blobs/snapshots dedup) — the `llamacpp-pull` sidecar populates this via `huggingface-cli download <repo> --local-dir <path>` reading from BOTH `llamacpp/models.cpu.json` and `models.cuda.json` (union of `repo` fields). Both CPU and CUDA wrappers share the same files. |
+
+Per-model GGUF + mmproj filenames + `llama-server` extra args are declared in `llamacpp/models.{cpu,cuda}.json`. Adding a new model:
+
+1. Append a new entry to both JSONs (or one if it's only relevant for one hardware). Required fields: `repo`, `gguf_file`, `endpoints`. Optional: `revision`, `mmproj_file` (vision models), `llama_server_args` (e.g. `--ctx-size`, `--n-gpu-layers`, `--parallel`).
+2. Bring the stack down and back up — the `llamacpp-pull` sidecar will fetch the new repo on next boot.
+3. Add a corresponding LiteLLM provider entry to `litellm/config/providers/llamacpp{,-cuda}.yaml` and regenerate `config.yaml` via `make build-config`.
+4. If the new model is heavy enough to need its own resource_manager group, add a `_LLAMACPP_MODELS` entry in `litellm/callbacks/resource_manager.py` so the `DELETE /api/ps/{model_id}` eviction fires on it.
+
+---
+
 ## MCP Tools — Media Generation (auto-enabled)
 
 Auto-enabled when any image or TTS provider is active (HuggingFace, OpenAI, Speaches, SDCPP, CUDA). Runs as an internal service — no direct nginx route, accessed only through LiteLLM's aggregated MCP endpoint at `/mcp/`.

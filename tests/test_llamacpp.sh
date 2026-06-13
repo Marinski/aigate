@@ -39,12 +39,15 @@ _llamacpp_data_url() {
     base64 -w 0 < "$path"
 }
 
-# Raster page 1 of a PDF to a PNG at 200 DPI. Uses pdftoppm (poppler-utils)
-# inside the test runner image. Output goes to a stable tmp path so the
-# test fn can pass it to _llamacpp_data_url.
+# Raster page 1 of a PDF to a PNG at 96 DPI — Surya's training-time
+# default (see surya/README "DPI can also impact throughput significantly
+# — you can adjust the DPI settings ... Try going from 192 to 96 for
+# improved throughput.") CPU-side vision encoding is the bottleneck and
+# is roughly quadratic in image area, so 200 DPI → ~4× slower than 96 DPI
+# for no quality gain on synthetic fixtures.
 _llamacpp_pdf_page1_png() {
     local pdf="$1" out_dir="$2"
-    pdftoppm -png -r 200 -f 1 -l 1 "$pdf" "$out_dir/page" >/dev/null 2>&1
+    pdftoppm -png -r 96 -f 1 -l 1 "$pdf" "$out_dir/page" >/dev/null 2>&1
     # pdftoppm writes <prefix>-<page-number>.png. Single-page → page-1.png.
     echo "$out_dir/page-1.png"
 }
@@ -71,9 +74,11 @@ _llamacpp_ocr_call() {
     local model="$1" image_url="$2" timeout="$3" task="$4"
     local prompt
     case "$task" in
-        block) prompt="OCR this block image to HTML." ;;
-        page)  prompt="OCR this image to HTML. Each block is a div with data-label and data-bbox (x0 y0 x1 y1, normalized 0-1000)." ;;
-        *)     echo "  FAIL: unknown task '$task'"; return 1 ;;
+        block)     prompt="OCR this block image to HTML." ;;
+        page)      prompt="OCR this image to HTML. Each block is a div with data-label and data-bbox (x0 y0 x1 y1, normalized 0-1000)." ;;
+        layout)    prompt="Output the layout of this image as JSON. Each entry is a dict with \"label\", \"bbox\", and \"count\" fields. Bbox is x0 y0 x1 y1, normalized 0-1000." ;;
+        table_rec) prompt="Output the table rows then columns as JSON. Each entry is a dict with \"label\" (\"Row\" or \"Col\") and \"bbox\" (x0 y0 x1 y1, normalized 0-1000)." ;;
+        *)         echo "  FAIL: unknown task '$task'"; return 1 ;;
     esac
     local body
     body=$(python3 -c "
@@ -316,13 +321,162 @@ test_llamacpp_cuda_url_captcha() {
     _llamacpp_test_url_captcha "local-llamacpp-cuda-surya-ocr-2" "llamacpp-cuda"
 }
 
+# ── Surya layout + table-recognition modes ─────────────────────────────────
+#
+# Surya is one VLM that switches behaviour based on which training-time
+# prompt it's given. The two OCR modes (block + page) are tested above.
+# Two more modes:
+#   layout      — emit JSON [{label, bbox, count}, ...] describing the
+#                 reading-order-sorted blocks (Text / Picture / Table /
+#                 Caption / etc.). Used by Surya's own LayoutPredictor
+#                 to pre-segment a page before per-block OCR.
+#   table_rec   — emit JSON [{label: "Row"|"Col", bbox}, ...] describing
+#                 the rows then columns of a table image. Used by
+#                 TableRecPredictor (simple mode); the full HTML output
+#                 ships only via predict_full() at the Python layer.
+#
+# These tests use the doc.pdf + table.pdf fixtures rasterized via
+# pdftoppm, and assert structural properties of the JSON (must contain
+# either a known label string or the expected JSON shape) — not exact
+# pixel-perfect bbox values, since those are noise-sensitive.
+
+_llamacpp_test_layout() {
+    local model="$1" tag="$2"
+    local fixture="$WORKDIR/tests/.fixtures/doc.pdf"
+    [ -f "$fixture" ] || { echo "  SKIP: missing $fixture"; return 0; }
+    if ! command -v pdftoppm >/dev/null 2>&1; then
+        echo "  SKIP: ${tag} pdftoppm not in PATH (need poppler-utils in the runner)"
+        return 0
+    fi
+    local tmp; tmp=$(mktemp -d)
+    local png; png=$(_llamacpp_pdf_page1_png "$fixture" "$tmp")
+    [ -f "$png" ] || { echo "  FAIL: ${tag} pdftoppm produced no PNG"; rm -rf "$tmp"; return 1; }
+    local url; url=$(_llamacpp_data_url "png" "$png")
+    local raw code content
+    raw=$(_llamacpp_ocr_call "$model" "$url" 600 "layout")
+    code=$(echo "$raw" | sed -n 's/^HTTP_CODE://p' | tail -1)
+    rm -rf "$tmp"
+    if [ "$code" != "200" ]; then
+        echo "  FAIL: ${tag} layout HTTP $code"
+        echo "  body: $(echo "$raw" | sed '/^HTTP_CODE:/d' | head -c 400)"
+        return 1
+    fi
+    content=$(_llamacpp_extract_content "$raw")
+    # Layout output is a JSON array of {label, bbox, count} objects. The
+    # exact labels depend on what Surya finds in the page (Text / Picture /
+    # SectionHeader / ...); we just assert the response is a non-empty JSON
+    # array with at least one `"label"` field — that's enough to prove the
+    # model entered layout mode and emitted the trained schema.
+    local first_label
+    first_label=$(echo "$content" | python3 -c "
+import json, sys, re
+raw = sys.stdin.read().strip()
+try:
+    data = json.loads(raw)
+except Exception:
+    # Surya occasionally wraps the JSON in stray whitespace or a leading
+    # newline. Salvage the first JSON array we can find.
+    m = re.search(r'\[.*\]', raw, re.DOTALL)
+    data = json.loads(m.group(0)) if m else None
+if not isinstance(data, list) or not data:
+    sys.exit(0)
+first = data[0]
+if isinstance(first, dict) and isinstance(first.get('label'), str):
+    print(first['label'])
+" 2>/dev/null)
+    if [ -z "$first_label" ]; then
+        echo "  FAIL: ${tag} layout — response is not a non-empty JSON array of {label, ...} objects"
+        echo "  body: $(echo "$content" | head -c 400)"
+        return 1
+    fi
+    echo "OK: ${tag} layout (first label=${first_label})"
+}
+
+_llamacpp_test_table_rec() {
+    local model="$1" tag="$2"
+    local fixture="$WORKDIR/tests/.fixtures/table.pdf"
+    [ -f "$fixture" ] || { echo "  SKIP: missing $fixture"; return 0; }
+    if ! command -v pdftoppm >/dev/null 2>&1; then
+        echo "  SKIP: ${tag} pdftoppm not in PATH (need poppler-utils in the runner)"
+        return 0
+    fi
+    local tmp; tmp=$(mktemp -d)
+    local png; png=$(_llamacpp_pdf_page1_png "$fixture" "$tmp")
+    [ -f "$png" ] || { echo "  FAIL: ${tag} pdftoppm produced no PNG"; rm -rf "$tmp"; return 1; }
+    local url; url=$(_llamacpp_data_url "png" "$png")
+    local raw code content
+    raw=$(_llamacpp_ocr_call "$model" "$url" 600 "table_rec")
+    code=$(echo "$raw" | sed -n 's/^HTTP_CODE://p' | tail -1)
+    rm -rf "$tmp"
+    if [ "$code" != "200" ]; then
+        echo "  FAIL: ${tag} table_rec HTTP $code"
+        echo "  body: $(echo "$raw" | sed '/^HTTP_CODE:/d' | head -c 400)"
+        return 1
+    fi
+    content=$(_llamacpp_extract_content "$raw")
+    # Table-rec output is a JSON array of {label: "Row"|"Col", bbox}. The
+    # fixture has 4 rows (1 header + 3 data) and 3 columns, so we expect at
+    # least one "Row" AND at least one "Col" entry. Anything else is a
+    # regression in either the wrapper or the model.
+    local counts
+    counts=$(echo "$content" | python3 -c "
+import json, sys, re
+raw = sys.stdin.read().strip()
+try:
+    data = json.loads(raw)
+except Exception:
+    m = re.search(r'\[.*\]', raw, re.DOTALL)
+    data = json.loads(m.group(0)) if m else None
+if not isinstance(data, list):
+    sys.exit(0)
+rows = sum(1 for e in data if isinstance(e, dict) and e.get('label') == 'Row')
+cols = sum(1 for e in data if isinstance(e, dict) and e.get('label') == 'Col')
+print(f'{rows} {cols}')
+" 2>/dev/null)
+    local rows cols
+    rows=$(echo "$counts" | awk '{print $1}')
+    cols=$(echo "$counts" | awk '{print $2}')
+    rows=${rows:-0}
+    cols=${cols:-0}
+    if [ "$rows" -lt 1 ] || [ "$cols" -lt 1 ]; then
+        echo "  FAIL: ${tag} table_rec — expected >=1 Row + >=1 Col, got rows=$rows cols=$cols"
+        echo "  body: $(echo "$content" | head -c 400)"
+        return 1
+    fi
+    echo "OK: ${tag} table_rec (rows=$rows cols=$cols)"
+}
+
+test_llamacpp_cpu_layout() {
+    _llamacpp_cpu_enabled || { echo "  SKIP: LLAMACPP not enabled"; return 0; }
+    _llamacpp_test_layout "local-llamacpp-surya-ocr-2" "llamacpp-cpu"
+}
+
+test_llamacpp_cpu_table_rec() {
+    _llamacpp_cpu_enabled || { echo "  SKIP: LLAMACPP not enabled"; return 0; }
+    _llamacpp_test_table_rec "local-llamacpp-surya-ocr-2" "llamacpp-cpu"
+}
+
+test_llamacpp_cuda_layout() {
+    _llamacpp_cuda_enabled || { echo "  SKIP: LLAMACPP_CUDA not enabled"; return 0; }
+    _llamacpp_test_layout "local-llamacpp-cuda-surya-ocr-2" "llamacpp-cuda"
+}
+
+test_llamacpp_cuda_table_rec() {
+    _llamacpp_cuda_enabled || { echo "  SKIP: LLAMACPP_CUDA not enabled"; return 0; }
+    _llamacpp_test_table_rec "local-llamacpp-cuda-surya-ocr-2" "llamacpp-cuda"
+}
+
 ALL_TESTS+=(
     test_llamacpp_cpu_models_list
     test_llamacpp_cpu_captcha_ocr
     test_llamacpp_cpu_pdf_ocr
     test_llamacpp_cpu_url_captcha
+    test_llamacpp_cpu_layout
+    test_llamacpp_cpu_table_rec
     test_llamacpp_cuda_models_list
     test_llamacpp_cuda_captcha_ocr
     test_llamacpp_cuda_pdf_ocr
     test_llamacpp_cuda_url_captcha
+    test_llamacpp_cuda_layout
+    test_llamacpp_cuda_table_rec
 )

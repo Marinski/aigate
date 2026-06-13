@@ -298,6 +298,22 @@ Supervised single-model wrapper around `vllm serve` for chat/completions/embeddi
 | `local-vllm-cuda-nomic-embed-v2` | nomic-ai/nomic-embed-text-v2-moe | embeddings, MoE 305M active, 8192 ctx |
 | `local-vllm-cuda-qwen3-0.6b` | Qwen/Qwen3-0.6B | chat / completions, 16384 ctx |
 
+## llama.cpp CPU (local — `LLAMACPP=1`)
+
+Supervised single-model wrapper around `llama-server` for GGUF chat / completions / embeddings, with native vision support via `mmproj`. Same lifecycle as vllm-wrap (`/api/ps`, `DELETE /api/ps/{model_id}`, idle TTL unload). The LiteLLM resource_manager evicts llamacpp whenever a competing CPU job (ollama / sdcpp-cpu / talkies-cpu / vllm-cpu) arrives. Add or change models by editing `llamacpp/models.cpu.json`. Wrapper rewrites `image_url.url: https://...` to `data:` URLs transparently so any OpenAI vision client works.
+
+| Alias | Model | Notes |
+| ----- | ----- | ----- |
+| `local-llamacpp-surya-ocr-2` | datalab-to/surya-ocr-2-gguf | Vision VLM (~650M, Qwen3-VL-style). One model, four trained-in prompt modes: **block OCR** (`OCR this block image to HTML.`), **full-page OCR** (`OCR this image to HTML. Each block is a div with data-label and data-bbox (x0 y0 x1 y1, normalized 0-1000).`), **layout detection** (`Output the layout of this image as JSON. Each entry is a dict with "label", "bbox", and "count" fields. Bbox is x0 y0 x1 y1, normalized 0-1000.`), **table recognition** (`Output the table rows then columns as JSON. Each entry is a dict with "label" ("Row" or "Col") and "bbox" (x0 y0 x1 y1, normalized 0-1000).`). Pass the prompts verbatim — they're training-time contracts. See [docs/usage.md#document-ocr-surya-2-via-llamacpp](usage.md) for curl examples of each mode. |
+
+## llama.cpp CUDA (local NVIDIA — `LLAMACPP_CUDA=1`)
+
+Same wrapper as the CPU variant but with `--n-gpu-layers 999` and the CUDA base image. Strongly preferred for vision-VLM work — Surya OCR 2 on a single A4 page at 96 DPI is ~seconds on CUDA vs minutes on CPU. Shares `${DATA_DIR_LLAMACPP}/models/` with the CPU variant — enabling both does not duplicate downloads. Participates in the LiteLLM resource_manager `cuda-llamacpp` group, so it evicts (and is evicted by) ollama-cuda / sdcpp-cuda / talkies-cuda / vllm-cuda under VRAM contention.
+
+| Alias | Model | Notes |
+| ----- | ----- | ----- |
+| `local-llamacpp-cuda-surya-ocr-2` | datalab-to/surya-ocr-2-gguf | Same model + same 4 prompt modes as the CPU slug — see the row above. |
+
 ---
 
 ## Fallbacks

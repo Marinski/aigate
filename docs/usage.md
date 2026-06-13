@@ -520,6 +520,160 @@ The vllm-cuda wrapper lazy-loads on the first request and unloads after `VLLM_CU
 
 ---
 
+## Document OCR (Surya 2 via llamacpp)
+
+With `LLAMACPP=1` (CPU) or `LLAMACPP_CUDA=1` (NVIDIA GPU), aigate ships **Surya OCR 2** — a single ~650M-param VLM that does OCR, layout detection, and table recognition. Behaviour switches on the **prompt string**, not the model. Both variants speak standard OpenAI vision chat completions.
+
+> **Pass the prompt strings verbatim.** They're training-time contracts — paraphrasing them flips the output mode (you'll get layout JSON when you wanted OCR HTML).
+
+Image input accepts both `data:image/...;base64,...` inline payloads AND `http(s)://...` URLs (the wrapper transparently fetches URLs and rewrites them before forwarding — `llama-server`'s `mtmd` only accepts data URLs natively).
+
+```bash
+# ── 1. OCR a single tight crop (one text region) ──────────────────────────
+# Use when you've already cropped to a single block of text.
+curl http://localhost:4000/v1/chat/completions \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"model\": \"local-llamacpp-cuda-surya-ocr-2\",
+    \"max_tokens\": 1024,
+    \"temperature\": 0.0,
+    \"messages\": [{
+      \"role\": \"user\",
+      \"content\": [
+        {\"type\": \"image_url\", \"image_url\": {\"url\": \"data:image/png;base64,$(base64 -w0 crop.png)\"}},
+        {\"type\": \"text\", \"text\": \"OCR this block image to HTML.\"}
+      ]
+    }]
+  }"
+# → assistant content: HTML for that crop. Math wrapped in <math>...</math>,
+#   tables in <table>...</table>, prose in <p>/<h1-h6>/etc.
+```
+
+```bash
+# ── 2. Full-page OCR (whole document image, blocks tagged with bboxes) ────
+# Use for end-to-end "give me everything on this page".
+curl http://localhost:4000/v1/chat/completions \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"model\": \"local-llamacpp-cuda-surya-ocr-2\",
+    \"max_tokens\": 4096,
+    \"temperature\": 0.0,
+    \"messages\": [{
+      \"role\": \"user\",
+      \"content\": [
+        {\"type\": \"image_url\", \"image_url\": {\"url\": \"https://example.com/scan.png\"}},
+        {\"type\": \"text\", \"text\": \"OCR this image to HTML. Each block is a div with data-label and data-bbox (x0 y0 x1 y1, normalized 0-1000).\"}
+      ]
+    }]
+  }"
+# → assistant content:
+#   <div data-label="SectionHeader" data-bbox="100 50 900 90">Heading</div>
+#   <div data-label="Text" data-bbox="100 100 900 400"><p>Paragraph...</p></div>
+#   <div data-label="Picture" data-bbox="100 410 900 700"></div>
+#   ...
+```
+
+```bash
+# ── 3. Layout-only (no OCR — just where the blocks are) ───────────────────
+# Use to pre-segment a page; then crop + send each block back through #1.
+curl http://localhost:4000/v1/chat/completions \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"model\": \"local-llamacpp-cuda-surya-ocr-2\",
+    \"max_tokens\": 1024,
+    \"temperature\": 0.0,
+    \"messages\": [{
+      \"role\": \"user\",
+      \"content\": [
+        {\"type\": \"image_url\", \"image_url\": {\"url\": \"https://example.com/scan.png\"}},
+        {\"type\": \"text\", \"text\": \"Output the layout of this image as JSON. Each entry is a dict with \\\"label\\\", \\\"bbox\\\", and \\\"count\\\" fields. Bbox is x0 y0 x1 y1, normalized 0-1000.\"}
+      ]
+    }]
+  }"
+# → assistant content (JSON array, reading-order-sorted):
+#   [
+#     {"label": "SectionHeader", "bbox": "100 50 900 90", "count": 5},
+#     {"label": "Text",          "bbox": "100 100 900 400", "count": 50},
+#     {"label": "Picture",       "bbox": "100 410 900 700", "count": 0},
+#     {"label": "Table",         "bbox": "100 720 900 1000", "count": 30}
+#   ]
+# Labels (canonical Surya set): Text, SectionHeader, Caption, Footnote,
+# Equation, ListGroup, Picture, Table, Form, PageHeader, PageFooter,
+# TableOfContents, Figure, Code, Bibliography, BlankPage, ChemicalBlock,
+# Diagram. `count` is the model's estimate of OCR tokens for that block —
+# useful for budgeting the decode when you feed the crops back through #1.
+```
+
+```bash
+# ── 4. Table recognition (rows + columns of a table image) ────────────────
+# Use after layout has flagged a region as "Table". Crop the table first,
+# THEN send the crop with this prompt.
+curl http://localhost:4000/v1/chat/completions \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"model\": \"local-llamacpp-cuda-surya-ocr-2\",
+    \"max_tokens\": 1024,
+    \"temperature\": 0.0,
+    \"messages\": [{
+      \"role\": \"user\",
+      \"content\": [
+        {\"type\": \"image_url\", \"image_url\": {\"url\": \"data:image/png;base64,$(base64 -w0 table-crop.png)\"}},
+        {\"type\": \"text\", \"text\": \"Output the table rows then columns as JSON. Each entry is a dict with \\\"label\\\" (\\\"Row\\\" or \\\"Col\\\") and \\\"bbox\\\" (x0 y0 x1 y1, normalized 0-1000).\"}
+      ]
+    }]
+  }"
+# → assistant content (JSON array):
+#   [
+#     {"label": "Row", "bbox": "0 0 1000 100"},
+#     {"label": "Row", "bbox": "0 100 1000 200"},
+#     ...
+#     {"label": "Col", "bbox": "0 0 333 1000"},
+#     {"label": "Col", "bbox": "333 0 666 1000"},
+#     ...
+#   ]
+# Cell geometry is the intersection of every Row × every Col bbox. For
+# full HTML output (handles spanning cells + header rows) use the upstream
+# Surya Python lib's TableRecPredictor.predict_full() pointed at our
+# endpoint (SURYA_INFERENCE_URL=http://localhost:4000/v1).
+```
+
+**Available slugs:**
+
+- `LLAMACPP=1` → `local-llamacpp-surya-ocr-2` (CPU)
+- `LLAMACPP_CUDA=1` → `local-llamacpp-cuda-surya-ocr-2` (CUDA — strongly preferred for interactive workloads)
+
+**Pick the right slug for the workload:**
+
+| Workload | Slug | Why |
+|---|---|---|
+| Interactive UI ("OCR this page now") | `local-llamacpp-cuda-surya-ocr-2` | A4 page OCR is ~6-12 s on CUDA |
+| Batch / overnight document processing | either, CPU is fine | A4 page OCR is ~2-3 min on a 4-core CPU container |
+| Small images (captchas, signature crops, single-line clips) | either | <30 s on CPU, ~3 s on CUDA — CPU is fine for short queues |
+| Real-time A4-page work | CUDA only | CPU is too slow (~minutes per page) |
+
+See [services-reference.md — Throughput](services-reference.md) for the full per-task wall-clock table.
+
+**PDF input?** Surya is image-only. Rasterize page N to PNG client-side at **96 DPI** (Surya's training-time default — higher DPI doesn't help and **inflates the prompt-token count quadratically**, so 200 DPI is roughly 4× slower than 96 DPI on CPU for no quality gain): `pdftoppm -png -r 96 -f N -l N doc.pdf out` (poppler-utils), or `pdf2image.convert_from_path(..., dpi=96)` from Python. Going below 96 DPI starts breaking small text (footnotes, dense tables) — keep `-r 96` as the floor.
+
+**Upstream Python lib + drop-in replacement.** Surya's `surya-ocr` pip package does the full orchestration (image pre-proc, prompt construction per task, multi-call routing — layout → crop → per-block OCR — and output parsing into typed dataclasses). It also runs Surya's small torch text-line-detector locally (not VLM). Point it at our endpoint:
+
+```bash
+pip install surya-ocr
+export SURYA_INFERENCE_BACKEND=vllm   # OpenAI-compatible client; works for ours too
+export SURYA_INFERENCE_URL=http://localhost:4000/v1
+# (No SURYA_INFERENCE_MODEL env in the lib — the upstream client hardcodes
+# the model id. Easiest workaround: register `local-llamacpp-cuda-surya-ocr-2`
+# as a LiteLLM alias of the slug Surya defaults to, or run a tiny rewrite
+# proxy. For most use cases the raw curl examples above are simpler.)
+surya_ocr docs/page.pdf
+```
+
+---
+
 ## LibreChat Web UI
 
 Enable with `LIBRECHAT=1` in `.env`. Access at `http://localhost:4000/librechat/`.
