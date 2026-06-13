@@ -2,6 +2,53 @@
 
 All notable changes to this project are documented here.
 
+## [v3.9.2] — 2026-06-13
+
+Docs reorganisation. Two monolithic files were growing unmanageable — `docs/services-reference.md` had hit ~960 lines (18 service sections in one file) and `docs/usage.md` ~780 lines (15 task-keyed sections, each duplicating context the reference file already had). Every new feature was widening both files in parallel. Split into per-feature pages under `docs/services/`.
+
+No production code changes. Pure documentation restructure.
+
+### New structure
+
+- [`docs/README.md`](docs/README.md) — top-level docs index ("start here" + "by service" + "by topic" navigation).
+- [`docs/services/README.md`](docs/services/README.md) — services index, organised by purpose (local inference / cloud gateway / storage / UIs / comms / network / cross-cutting).
+- [`docs/services/<name>.md`](docs/services/) — **one file per service**, combining what used to be split between `services-reference.md` (deep reference: endpoints, models, config, internals) and `usage.md` (curl recipes, examples) into a single page. 18 files total:
+
+  | Service | New page |
+  |---|---|
+  | LiteLLM gateway | [`services/litellm.md`](docs/services/litellm.md) |
+  | LibreChat | [`services/librechat.md`](docs/services/librechat.md) |
+  | Claudebox + pibox-zai agentic coding | [`services/claudebox.md`](docs/services/claudebox.md) |
+  | MCP tools (media gen + search) | [`services/mcp.md`](docs/services/mcp.md) |
+  | hybrids3 | [`services/hybrids3.md`](docs/services/hybrids3.md) |
+  | browser | [`services/browser.md`](docs/services/browser.md) |
+  | searxng | [`services/searxng.md`](docs/services/searxng.md) |
+  | sd.cpp | [`services/sdcpp.md`](docs/services/sdcpp.md) |
+  | vllm / vllm-cuda | [`services/vllm.md`](docs/services/vllm.md) |
+  | llamacpp / llamacpp-cuda — Surya OCR 2 + future GGUF VLMs | [`services/llamacpp.md`](docs/services/llamacpp.md) |
+  | talkies / talkies-cuda — ASR + TTS | [`services/talkies.md`](docs/services/talkies.md) |
+  | audiolla / audiolla-cuda — audio production | [`services/audiolla.md`](docs/services/audiolla.md) |
+  | predictalot | [`services/predictalot.md`](docs/services/predictalot.md) |
+  | mailbox — IMAP + SMTP gateway | [`services/mailbox.md`](docs/services/mailbox.md) |
+  | telethon — Telegram REST + MCP | [`services/telethon.md`](docs/services/telethon.md) |
+  | cloudflared | [`services/cloudflared.md`](docs/services/cloudflared.md) |
+  | tailscale | [`services/tailscale.md`](docs/services/tailscale.md) |
+  | Resource management (cross-cutting) | [`services/resource-management.md`](docs/services/resource-management.md) |
+
+### Old files now redirect
+
+Both `docs/services-reference.md` and `docs/usage.md` were trimmed to a single table mapping each old section to its new home under `docs/services/`. Existing inbound links to those two files keep working via the redirects; deep links to specific section anchors (`#cloudflared-optional` etc.) need to migrate to the per-service file.
+
+### README + providers.md link updates
+
+- `README.md` — every link that pointed at `docs/services-reference.md#<section>` or `docs/usage.md#<section>` was rewritten to point at the corresponding `docs/services/<name>.md`.
+- `docs/providers.md` — the Surya OCR alias row's "see [docs/usage.md#document-ocr-surya-2-via-llamacpp]" pointer rewritten to point at `docs/services/llamacpp.md`.
+
+### Out of scope (intentional)
+
+- `docs/providers.md`, `docs/testing.md`, `docs/mcp-tools.md` were already focused single-purpose files — left in place at the top level.
+- Historical CHANGELOG entries that mention old paths (`docs/services-reference.md` etc.) are NOT rewritten — they document what happened at the time of each past release.
+
 ## [v3.9.1] — 2026-06-13
 
 Follow-up to v3.9.0 — exercises and documents the two Surya OCR 2 modes the original release shipped but did not test (layout detection + table recognition), drops the test runner's PDF DPI to Surya's training-time default, and adds full Surya usage docs across README + `docs/services-reference.md` + `docs/usage.md` + `docs/providers.md`.
