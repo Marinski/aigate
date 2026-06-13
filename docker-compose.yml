@@ -969,6 +969,12 @@ services:
       LLAMACPP_WRAP_REQUEST_TIMEOUT: ${LLAMACPP_REQUEST_TIMEOUT:-300}
       LLAMACPP_WRAP_LOG_LEVEL: ${LLAMACPP_LOG_LEVEL:-INFO}
       LLAMACPP_WRAP_PRELOAD: ${LLAMACPP_PRELOAD:-}
+      # Auto-ctx-size resolver knobs — see .env.example for the rationale.
+      # Empty fallbacks let the supervisor pick its own conservative defaults
+      # (LLAMACPP_WRAP_CTX_FLOOR=16384, LLAMACPP_WRAP_CTX_SAFETY_MARGIN_BYTES
+      # =1073741824).
+      LLAMACPP_WRAP_CTX_FLOOR: ${LLAMACPP_CTX_FLOOR:-}
+      LLAMACPP_WRAP_CTX_SAFETY_MARGIN_BYTES: ${LLAMACPP_CTX_SAFETY_MARGIN_BYTES:-}
     volumes:
       - ${DATA_DIR_LLAMACPP:-${DATA_DIR:-.data}/llamacpp}:/data
     depends_on:
@@ -1001,6 +1007,9 @@ services:
       LLAMACPP_WRAP_REQUEST_TIMEOUT: ${LLAMACPP_CUDA_REQUEST_TIMEOUT:-300}
       LLAMACPP_WRAP_LOG_LEVEL: ${LLAMACPP_CUDA_LOG_LEVEL:-INFO}
       LLAMACPP_WRAP_PRELOAD: ${LLAMACPP_CUDA_PRELOAD:-}
+      # Auto-ctx-size resolver knobs — see .env.example for the rationale.
+      LLAMACPP_WRAP_CTX_FLOOR: ${LLAMACPP_CUDA_CTX_FLOOR:-}
+      LLAMACPP_WRAP_CTX_SAFETY_MARGIN_BYTES: ${LLAMACPP_CUDA_CTX_SAFETY_MARGIN_BYTES:-}
     volumes:
       - ${DATA_DIR_LLAMACPP:-${DATA_DIR:-.data}/llamacpp}:/data
     depends_on:

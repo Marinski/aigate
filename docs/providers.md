@@ -300,11 +300,11 @@ Supervised single-model wrapper around `vllm serve` for chat/completions/embeddi
 
 ## llama.cpp CPU (local — `LLAMACPP=1`)
 
-Supervised single-model wrapper around `llama-server` for GGUF chat / completions / embeddings, with native vision support via `mmproj`. Same lifecycle as vllm-wrap (`/api/ps`, `DELETE /api/ps/{model_id}`, idle TTL unload). The LiteLLM resource_manager evicts llamacpp whenever a competing CPU job (ollama / sdcpp-cpu / talkies-cpu / vllm-cpu) arrives. Add or change models by editing `llamacpp/models.cpu.json`. Wrapper rewrites `image_url.url: https://...` to `data:` URLs transparently so any OpenAI vision client works.
+Supervised single-model wrapper around `llama-server` for GGUF chat / completions / embeddings, with native vision support via `mmproj`. Same lifecycle as vllm-wrap (`/api/ps`, `DELETE /api/ps/{model_id}`, idle TTL unload). The LiteLLM resource_manager evicts llamacpp whenever a competing CPU job (ollama / sdcpp-cpu / talkies-cpu / vllm-cpu) arrives. Add or change models by editing `llamacpp/models.cpu.json`. Wrapper rewrites `image_url.url: https://...` to `data:` URLs transparently so any OpenAI vision client works. **Server-side PDF input** + **auto `--ctx-size`** — see the Surya row below.
 
 | Alias | Model | Notes |
 | ----- | ----- | ----- |
-| `local-llamacpp-surya-ocr-2` | datalab-to/surya-ocr-2-gguf | Vision VLM (~650M, Qwen3-VL-style). One model, four trained-in prompt modes: **block OCR** (`OCR this block image to HTML.`), **full-page OCR** (`OCR this image to HTML. Each block is a div with data-label and data-bbox (x0 y0 x1 y1, normalized 0-1000).`), **layout detection** (`Output the layout of this image as JSON. Each entry is a dict with "label", "bbox", and "count" fields. Bbox is x0 y0 x1 y1, normalized 0-1000.`), **table recognition** (`Output the table rows then columns as JSON. Each entry is a dict with "label" ("Row" or "Col") and "bbox" (x0 y0 x1 y1, normalized 0-1000).`). Pass the prompts verbatim — they're training-time contracts. See [docs/services/llamacpp.md](services/llamacpp.md) for curl examples of each mode. |
+| `local-llamacpp-surya-ocr-2` | datalab-to/surya-ocr-2-gguf | Vision VLM (~650M, Qwen3-VL-style hybrid Mamba+attention, **256K trained context**). One model, four trained-in prompt modes: **block OCR** (`OCR this block image to HTML.`), **full-page OCR** (`OCR this image to HTML. Each block is a div with data-label and data-bbox (x0 y0 x1 y1, normalized 0-1000).`), **layout detection** (`Output the layout of this image as JSON. Each entry is a dict with "label", "bbox", and "count" fields. Bbox is x0 y0 x1 y1, normalized 0-1000.`), **table recognition** (`Output the table rows then columns as JSON. Each entry is a dict with "label" ("Row" or "Col") and "bbox" (x0 y0 x1 y1, normalized 0-1000).`). Pass the prompts verbatim — they're training-time contracts. **PDF input is server-side** — drop a PDF in `image_url.url` (data URL or http URL) and the wrapper rasterizes per page, runs the per-page chat completion, stitches the responses by prompt mode. Per-request `dpi_rescale_to` knob (default 96 cap, `-1` for native, hard cap 600). `--ctx-size` is set to `auto` — the supervisor probes free RAM and picks the largest fitting ctx, capped at the model's 256K trained max. See [docs/services/llamacpp.md](services/llamacpp.md) for curl examples of each mode and the auto-ctx-size math. |
 
 ## llama.cpp CUDA (local NVIDIA — `LLAMACPP_CUDA=1`)
 
@@ -312,7 +312,7 @@ Same wrapper as the CPU variant but with `--n-gpu-layers 999` and the CUDA base 
 
 | Alias | Model | Notes |
 | ----- | ----- | ----- |
-| `local-llamacpp-cuda-surya-ocr-2` | datalab-to/surya-ocr-2-gguf | Same model + same 4 prompt modes as the CPU slug — see the row above. |
+| `local-llamacpp-cuda-surya-ocr-2` | datalab-to/surya-ocr-2-gguf | Same model + same 4 prompt modes + same server-side PDF handling + `dpi_rescale_to` knob + auto `--ctx-size` as the CPU slug — see the row above. The resolver picks the **full 262144 trained max** on any RTX-class GPU with ~3+ GB free for KV cache (verified live on the aigate stack). |
 
 ---
 

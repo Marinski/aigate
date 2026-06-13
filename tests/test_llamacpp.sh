@@ -466,6 +466,287 @@ test_llamacpp_cuda_table_rec() {
     _llamacpp_test_table_rec "local-llamacpp-cuda-surya-ocr-2" "llamacpp-cuda"
 }
 
+# ── direct PDF input (Surya handler — server-side rasterize + stitch) ──────
+#
+# The wrapper grew a per-model handler hook; the Surya handler detects PDF
+# input in `image_url.url` (data:application/pdf;base64,... or http URL
+# with application/pdf Content-Type), rasterizes each page server-side via
+# poppler-utils, loops the chat completion per page, and stitches the
+# results back per detected Surya prompt mode. These tests verify:
+#
+#   - PDF as a data: URL works (single-page + multi-page)
+#   - Per-page stitching tags each page with `<div data-page="N">`
+#   - Layout mode adds a `page` field to each JSON entry
+#   - Block-OCR mode rejected with HTTP 400 (single-image only)
+#   - `dpi_rescale_to` extension is parsed (`-1` and explicit values)
+
+# Build a PDF data: URL inline.
+_llamacpp_pdf_data_url() {
+    local path="$1"
+    printf 'data:application/pdf;base64,'
+    base64 -w 0 < "$path"
+}
+
+# Same POST shape as _llamacpp_ocr_call but feeds an arbitrary
+# image_url + lets the caller add a top-level `dpi_rescale_to` field
+# (passed unquoted as JSON — caller passes "-1" or "96" or "" to skip).
+_llamacpp_ocr_call_with_dpi() {
+    local model="$1" image_url="$2" timeout="$3" task="$4" dpi="$5"
+    local prompt
+    case "$task" in
+        block)     prompt="OCR this block image to HTML." ;;
+        page)      prompt="OCR this image to HTML. Each block is a div with data-label and data-bbox (x0 y0 x1 y1, normalized 0-1000)." ;;
+        layout)    prompt="Output the layout of this image as JSON. Each entry is a dict with \"label\", \"bbox\", and \"count\" fields. Bbox is x0 y0 x1 y1, normalized 0-1000." ;;
+        table_rec) prompt="Output the table rows then columns as JSON. Each entry is a dict with \"label\" (\"Row\" or \"Col\") and \"bbox\" (x0 y0 x1 y1, normalized 0-1000)." ;;
+        *)         echo "  FAIL: unknown task '$task'"; return 1 ;;
+    esac
+    local body
+    body=$(python3 -c "
+import json, sys
+payload = {
+    'model': sys.argv[1],
+    'max_tokens': 2048,
+    'temperature': 0.0,
+    'messages': [{
+        'role': 'user',
+        'content': [
+            {'type': 'image_url', 'image_url': {'url': sys.argv[2]}},
+            {'type': 'text', 'text': sys.argv[3]},
+        ],
+    }],
+}
+dpi = sys.argv[4]
+if dpi:
+    payload['dpi_rescale_to'] = int(dpi)
+print(json.dumps(payload))
+" "$model" "$image_url" "$prompt" "$dpi")
+    curl -s -m "$timeout" -X POST "$BASE_URL/v1/chat/completions" \
+        -H "$AUTH_HEADER" \
+        -H "Content-Type: application/json" \
+        -d "$body" \
+        -w "\nHTTP_CODE:%{http_code}"
+}
+
+_llamacpp_test_pdf_data_url() {
+    local model="$1" tag="$2"
+    local fixture="$WORKDIR/tests/.fixtures/doc.pdf"
+    [ -f "$fixture" ] || { echo "  SKIP: missing $fixture"; return 0; }
+    local url; url=$(_llamacpp_pdf_data_url "$fixture")
+    local raw code content
+    raw=$(_llamacpp_ocr_call_with_dpi "$model" "$url" 600 "page" "")
+    code=$(echo "$raw" | sed -n 's/^HTTP_CODE://p' | tail -1)
+    if [ "$code" != "200" ]; then
+        echo "  FAIL: ${tag} PDF data URL HTTP $code"
+        echo "  body: $(echo "$raw" | sed '/^HTTP_CODE:/d' | head -c 400)"
+        return 1
+    fi
+    content=$(_llamacpp_extract_content "$raw")
+    local lower; lower=$(echo "$content" | tr '[:upper:]' '[:lower:]')
+    assert_contains "$lower" "quick brown fox" "${tag} PDF data URL contains 'quick brown fox'" || return 1
+    assert_contains "$content" 'data-page="1"' "${tag} PDF data URL stitched as 'data-page=\"1\"'" || return 1
+    echo "OK: ${tag} pdf_data_url"
+}
+
+_llamacpp_test_pdf_multipage() {
+    local model="$1" tag="$2"
+    local fixture="$WORKDIR/tests/.fixtures/doc-multipage.pdf"
+    [ -f "$fixture" ] || { echo "  SKIP: missing $fixture"; return 0; }
+    local url; url=$(_llamacpp_pdf_data_url "$fixture")
+    local raw code content
+    raw=$(_llamacpp_ocr_call_with_dpi "$model" "$url" 900 "page" "")
+    code=$(echo "$raw" | sed -n 's/^HTTP_CODE://p' | tail -1)
+    if [ "$code" != "200" ]; then
+        echo "  FAIL: ${tag} multi-page PDF HTTP $code"
+        echo "  body: $(echo "$raw" | sed '/^HTTP_CODE:/d' | head -c 400)"
+        return 1
+    fi
+    content=$(_llamacpp_extract_content "$raw")
+    # 3 unique substrings, one per page — proves the stitcher walked
+    # every page and concatenated their contents in order.
+    assert_contains "$content" 'data-page="1"' "${tag} multipage page 1 wrapper" || return 1
+    assert_contains "$content" 'data-page="2"' "${tag} multipage page 2 wrapper" || return 1
+    assert_contains "$content" 'data-page="3"' "${tag} multipage page 3 wrapper" || return 1
+    assert_contains "$content" 'Alpha' "${tag} multipage contains page 1 text 'Alpha'" || return 1
+    assert_contains "$content" 'Beta'  "${tag} multipage contains page 2 text 'Beta'"  || return 1
+    assert_contains "$content" 'Gamma' "${tag} multipage contains page 3 text 'Gamma'" || return 1
+    # x_surya_pages should be 3
+    local pages
+    pages=$(echo "$raw" | sed '/^HTTP_CODE:/d' | python3 -c "import sys,json; print(json.load(sys.stdin).get('x_surya_pages',''))" 2>/dev/null)
+    assert_eq "$pages" "3" "${tag} multipage x_surya_pages=3" || return 1
+    echo "OK: ${tag} pdf_multipage"
+}
+
+_llamacpp_test_pdf_layout() {
+    local model="$1" tag="$2"
+    local fixture="$WORKDIR/tests/.fixtures/doc.pdf"
+    [ -f "$fixture" ] || { echo "  SKIP: missing $fixture"; return 0; }
+    local url; url=$(_llamacpp_pdf_data_url "$fixture")
+    local raw code content
+    raw=$(_llamacpp_ocr_call_with_dpi "$model" "$url" 600 "layout" "")
+    code=$(echo "$raw" | sed -n 's/^HTTP_CODE://p' | tail -1)
+    if [ "$code" != "200" ]; then
+        echo "  FAIL: ${tag} PDF layout HTTP $code"
+        echo "  body: $(echo "$raw" | sed '/^HTTP_CODE:/d' | head -c 400)"
+        return 1
+    fi
+    content=$(_llamacpp_extract_content "$raw")
+    # Layout stitcher should produce a JSON array where every entry has
+    # a "page" field added in.
+    local check
+    check=$(echo "$content" | python3 -c "
+import json, sys, re
+raw = sys.stdin.read().strip()
+m = re.search(r'\[.*\]', raw, re.DOTALL)
+if not m:
+    print('NO_ARRAY'); sys.exit(0)
+try:
+    data = json.loads(m.group(0))
+except Exception:
+    print('PARSE_FAIL'); sys.exit(0)
+if not isinstance(data, list) or not data:
+    print('NOT_LIST'); sys.exit(0)
+if all(isinstance(e, dict) and 'page' in e for e in data):
+    print('OK')
+else:
+    print('MISSING_PAGE')
+" 2>/dev/null)
+    assert_eq "$check" "OK" "${tag} PDF layout: every entry has 'page' field" || return 1
+    echo "OK: ${tag} pdf_layout"
+}
+
+_llamacpp_test_pdf_block_rejected() {
+    local model="$1" tag="$2"
+    local fixture="$WORKDIR/tests/.fixtures/doc.pdf"
+    [ -f "$fixture" ] || { echo "  SKIP: missing $fixture"; return 0; }
+    local url; url=$(_llamacpp_pdf_data_url "$fixture")
+    local raw code body
+    raw=$(_llamacpp_ocr_call_with_dpi "$model" "$url" 60 "block" "")
+    code=$(echo "$raw" | sed -n 's/^HTTP_CODE://p' | tail -1)
+    if [ "$code" != "400" ]; then
+        echo "  FAIL: ${tag} PDF+block expected HTTP 400, got $code"
+        echo "  body: $(echo "$raw" | sed '/^HTTP_CODE:/d' | head -c 400)"
+        return 1
+    fi
+    body=$(echo "$raw" | sed '/^HTTP_CODE:/d')
+    assert_contains "$body" "single-image" "${tag} 400 mentions 'single-image' rejection" || return 1
+    echo "OK: ${tag} pdf_block_rejected"
+}
+
+_llamacpp_test_pdf_dpi_negative_one() {
+    local model="$1" tag="$2"
+    local fixture="$WORKDIR/tests/.fixtures/doc.pdf"
+    [ -f "$fixture" ] || { echo "  SKIP: missing $fixture"; return 0; }
+    local url; url=$(_llamacpp_pdf_data_url "$fixture")
+    local raw code content
+    raw=$(_llamacpp_ocr_call_with_dpi "$model" "$url" 600 "page" "-1")
+    code=$(echo "$raw" | sed -n 's/^HTTP_CODE://p' | tail -1)
+    if [ "$code" != "200" ]; then
+        echo "  FAIL: ${tag} dpi_rescale_to=-1 HTTP $code"
+        echo "  body: $(echo "$raw" | sed '/^HTTP_CODE:/d' | head -c 400)"
+        return 1
+    fi
+    content=$(_llamacpp_extract_content "$raw")
+    local lower; lower=$(echo "$content" | tr '[:upper:]' '[:lower:]')
+    assert_contains "$lower" "quick brown fox" "${tag} dpi=-1 contains 'quick brown fox'" || return 1
+    echo "OK: ${tag} pdf_dpi_rescale_negative_one"
+}
+
+test_llamacpp_cpu_pdf_data_url() {
+    _llamacpp_cpu_enabled || { echo "  SKIP: LLAMACPP not enabled"; return 0; }
+    _llamacpp_test_pdf_data_url "local-llamacpp-surya-ocr-2" "llamacpp-cpu"
+}
+test_llamacpp_cpu_pdf_multipage() {
+    _llamacpp_cpu_enabled || { echo "  SKIP: LLAMACPP not enabled"; return 0; }
+    _llamacpp_test_pdf_multipage "local-llamacpp-surya-ocr-2" "llamacpp-cpu"
+}
+test_llamacpp_cpu_pdf_layout() {
+    _llamacpp_cpu_enabled || { echo "  SKIP: LLAMACPP not enabled"; return 0; }
+    _llamacpp_test_pdf_layout "local-llamacpp-surya-ocr-2" "llamacpp-cpu"
+}
+test_llamacpp_cpu_pdf_block_rejected() {
+    _llamacpp_cpu_enabled || { echo "  SKIP: LLAMACPP not enabled"; return 0; }
+    _llamacpp_test_pdf_block_rejected "local-llamacpp-surya-ocr-2" "llamacpp-cpu"
+}
+test_llamacpp_cpu_pdf_dpi_negative_one() {
+    _llamacpp_cpu_enabled || { echo "  SKIP: LLAMACPP not enabled"; return 0; }
+    _llamacpp_test_pdf_dpi_negative_one "local-llamacpp-surya-ocr-2" "llamacpp-cpu"
+}
+
+test_llamacpp_cuda_pdf_data_url() {
+    _llamacpp_cuda_enabled || { echo "  SKIP: LLAMACPP_CUDA not enabled"; return 0; }
+    _llamacpp_test_pdf_data_url "local-llamacpp-cuda-surya-ocr-2" "llamacpp-cuda"
+}
+test_llamacpp_cuda_pdf_multipage() {
+    _llamacpp_cuda_enabled || { echo "  SKIP: LLAMACPP_CUDA not enabled"; return 0; }
+    _llamacpp_test_pdf_multipage "local-llamacpp-cuda-surya-ocr-2" "llamacpp-cuda"
+}
+test_llamacpp_cuda_pdf_layout() {
+    _llamacpp_cuda_enabled || { echo "  SKIP: LLAMACPP_CUDA not enabled"; return 0; }
+    _llamacpp_test_pdf_layout "local-llamacpp-cuda-surya-ocr-2" "llamacpp-cuda"
+}
+test_llamacpp_cuda_pdf_block_rejected() {
+    _llamacpp_cuda_enabled || { echo "  SKIP: LLAMACPP_CUDA not enabled"; return 0; }
+    _llamacpp_test_pdf_block_rejected "local-llamacpp-cuda-surya-ocr-2" "llamacpp-cuda"
+}
+test_llamacpp_cuda_pdf_dpi_negative_one() {
+    _llamacpp_cuda_enabled || { echo "  SKIP: LLAMACPP_CUDA not enabled"; return 0; }
+    _llamacpp_test_pdf_dpi_negative_one "local-llamacpp-cuda-surya-ocr-2" "llamacpp-cuda"
+}
+
+# ── auto ctx-size resolver ────────────────────────────────────────────────
+#
+# Verifies the supervisor resolved `--ctx-size auto` to a concrete value at
+# spawn time. We assert: (a) the resolver log line landed, (b) the chosen
+# value is at or above the floor (16384), (c) the value is a multiple of
+# 1024. Doesn't pin a specific exact value — that depends on real-time
+# free VRAM/RAM at the moment of spawn (other CUDA tenants, container
+# mem-limit, current talkies/sdcpp load state).
+#
+# Uses `docker logs` against the wrapper container, so this test is only
+# meaningful when the runner has docker socket access to the live stack.
+_llamacpp_test_ctx_auto_resolved() {
+    local container="$1" tag="$2"
+    if ! docker inspect "$container" >/dev/null 2>&1; then
+        echo "  SKIP: ${tag} container ${container} not running"
+        return 0
+    fi
+    local line chosen rem
+    # The resolver logs two lines on every spawn — pick the most recent.
+    line=$(docker logs "$container" 2>&1 \
+        | grep -E 'ctx-size auto math:' \
+        | tail -1)
+    if [ -z "$line" ]; then
+        echo "  FAIL: ${tag} no 'ctx-size auto math:' log line — resolver did not run"
+        return 1
+    fi
+    chosen=$(echo "$line" | sed -nE 's/.*chosen=([0-9]+).*/\1/p')
+    if [ -z "$chosen" ]; then
+        echo "  FAIL: ${tag} could not parse chosen=N from resolver log"
+        echo "  line: $line"
+        return 1
+    fi
+    if [ "$chosen" -lt 16384 ]; then
+        echo "  FAIL: ${tag} resolver picked chosen=$chosen, below floor 16384"
+        return 1
+    fi
+    rem=$(( chosen % 1024 ))
+    if [ "$rem" -ne 0 ]; then
+        echo "  FAIL: ${tag} resolver picked chosen=$chosen, not a multiple of 1024"
+        return 1
+    fi
+    echo "OK: ${tag} ctx-size auto resolved to $chosen (≥ floor, %1024 == 0)"
+}
+
+test_llamacpp_cpu_ctx_auto_resolved() {
+    _llamacpp_cpu_enabled || { echo "  SKIP: LLAMACPP not enabled"; return 0; }
+    _llamacpp_test_ctx_auto_resolved "aigate-llamacpp-1" "llamacpp-cpu"
+}
+
+test_llamacpp_cuda_ctx_auto_resolved() {
+    _llamacpp_cuda_enabled || { echo "  SKIP: LLAMACPP_CUDA not enabled"; return 0; }
+    _llamacpp_test_ctx_auto_resolved "aigate-llamacpp-cuda-1" "llamacpp-cuda"
+}
+
 ALL_TESTS+=(
     test_llamacpp_cpu_models_list
     test_llamacpp_cpu_captcha_ocr
@@ -473,10 +754,22 @@ ALL_TESTS+=(
     test_llamacpp_cpu_url_captcha
     test_llamacpp_cpu_layout
     test_llamacpp_cpu_table_rec
+    test_llamacpp_cpu_pdf_data_url
+    test_llamacpp_cpu_pdf_multipage
+    test_llamacpp_cpu_pdf_layout
+    test_llamacpp_cpu_pdf_block_rejected
+    test_llamacpp_cpu_pdf_dpi_negative_one
+    test_llamacpp_cpu_ctx_auto_resolved
     test_llamacpp_cuda_models_list
     test_llamacpp_cuda_captcha_ocr
     test_llamacpp_cuda_pdf_ocr
     test_llamacpp_cuda_url_captcha
     test_llamacpp_cuda_layout
     test_llamacpp_cuda_table_rec
+    test_llamacpp_cuda_pdf_data_url
+    test_llamacpp_cuda_pdf_multipage
+    test_llamacpp_cuda_pdf_layout
+    test_llamacpp_cuda_pdf_block_rejected
+    test_llamacpp_cuda_pdf_dpi_negative_one
+    test_llamacpp_cuda_ctx_auto_resolved
 )

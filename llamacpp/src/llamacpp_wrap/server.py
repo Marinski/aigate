@@ -30,6 +30,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 from . import config
+from . import handlers
 from .logging import configure as configure_logging
 from .supervisor import Supervisor, SupervisorError
 
@@ -220,11 +221,29 @@ async def _handle_json_request(
     except SupervisorError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
-    # llama-server's mtmd vision pipeline accepts data: URLs only — it does
-    # NOT fetch http(s):// URLs from the OpenAI `image_url.url` field. The
-    # OpenAI wire spec allows both, so we transparently fetch any
-    # http(s)://... URL here and rewrite it to a data: URL before forwarding.
-    # Anything else (data:..., empty, malformed) is left untouched.
+    # If this model declares an orchestration handler (in models.{cpu,cuda}
+    # .json), give it first crack at the request. The handler can do
+    # whatever per-modality routing it wants (PDF rasterization + per-page
+    # loop for Surya OCR; future: audio chunking; etc.) and either return
+    # a Response (short-circuit) or return None (fall through to the
+    # default one-shot proxy).
+    handler = handlers.get(entry.get("handler"))
+    if handler is not None:
+        async def _forward(p: dict) -> Response:
+            return await _proxy_one_payload(request, path, p)
+
+        handler_resp = await handler.handle(
+            request=request, payload=payload, forward=_forward
+        )
+        if handler_resp is not None:
+            return handler_resp
+
+    # Default path — llama-server's mtmd vision pipeline accepts data:
+    # URLs only and does NOT fetch http(s):// URLs from the OpenAI
+    # `image_url.url` field. The OpenAI wire spec allows both, so we
+    # transparently fetch any http(s)://... URL here and rewrite it to
+    # a data: URL before forwarding. Anything else (data:..., empty,
+    # malformed) is left untouched.
     rewrote, payload = await _rewrite_image_urls_to_data(payload)
     if rewrote:
         body = json.dumps(payload).encode("utf-8")
@@ -236,6 +255,30 @@ async def _handle_json_request(
         body=body,
         content_type="application/json",
         is_stream=is_stream,
+    )
+
+
+async def _proxy_one_payload(
+    request: Request,
+    path: str,
+    payload: dict,
+) -> Response:
+    """Helper handed to model handlers as the `forward` callable.
+
+    Takes a fully-resolved payload (the handler is responsible for any
+    modality-specific pre-processing) and runs the same image-URL
+    rewriting + non-streamed proxy that the default path uses, returning
+    the raw fastapi Response with the upstream body so the handler can
+    parse it.
+    """
+    _, payload = await _rewrite_image_urls_to_data(payload)
+    body = json.dumps(payload).encode("utf-8")
+    return await _do_proxy(
+        request,
+        path=path,
+        body=body,
+        content_type="application/json",
+        is_stream=False,
     )
 
 

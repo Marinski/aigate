@@ -36,7 +36,7 @@ Base images pinned by digest: `ghcr.io/ggml-org/llama.cpp:server@sha256:7d02b045
 | A full document page with **dense / complex** layout | Higher-accuracy text in reading order | **Layout → crop → Block OCR per block** | Slower but more accurate on multi-column / heavy-illustration / scan-quality pages. Also lets you skip `Picture` / `Figure` / `BlankPage` blocks. |
 | A full page; just want to know WHERE blocks are | Block positions, no text yet | **Layout only** | Use to budget downstream OCR cost (the `count` field per block) or to route specific blocks differently (e.g. Tables → table-rec, Text → OCR, Picture → image-captioning). |
 | A page with a table on it | The table's grid structure | **Layout → crop the `Table` block → Table recognition** | `table_rec` on the raw full page produces unreliable output. You **must** crop to a tight table region first. |
-| Multi-page PDF | All pages OCR'd | Loop client-side: rasterize each page (96 DPI) → run one of the above pipelines per page | Surya / llamacpp are stateless per call — pagination is your job. |
+| Multi-page PDF | All pages OCR'd | **Send the PDF directly** in `image_url.url` (data URL or http URL) — the wrapper rasterizes each page, runs the per-page chat completion, and stitches the responses. Per-mode stitching: full-page → `<div data-page="N">` wrappers, layout / table → `"page": N` field per JSON entry, block → 400 (single-image only, crop first). See the "PDF input — server-side handling" section below. | Or pre-rasterize client-side and loop one PNG per call if you need fine-grained control over which pages to send. |
 
 ## Workflow recipes
 
@@ -259,17 +259,115 @@ The wrapper accepts both, and rewrites the request before forwarding to `llama-s
 
 URL fetching is hard-capped at **32 MB / 30 s** per image, follows redirects, and trusts an explicit `image/*` Content-Type when present (falls back to the URL extension). Anything else (non-`http(s)`, non-`data:`, missing) is passed through untouched so the underlying backend's own error handling kicks in.
 
-## PDF input
+## PDF input — server-side handling
 
-PDFs are NOT a native input — rasterize page N to PNG client-side at **96 DPI** (Surya's training-time default; higher DPI inflates the prompt-token count quadratically without quality gain, lower DPI breaks small text recognition).
+The wrapper accepts PDFs directly via the same `image_url.url` field. When the `surya-ocr-2` model declares `"handler": "surya"` in its `models.{cpu,cuda}.json` entry, the wrapper's Surya handler:
+
+1. Detects PDF input — either a `data:application/pdf;base64,...` URL or an `http(s)://...` URL whose fetched body returns `Content-Type: application/pdf` (or `.pdf` extension fallback).
+2. Probes each page's native DPI via `pdfimages -list` (max DPI of any embedded raster image on that page; vector-only pages fall back to 96 DPI).
+3. Rasterizes each page via `pdftoppm -r <chosen_dpi>`.
+4. Detects the Surya prompt mode from the text content (block / page / layout / table-rec).
+5. Loops the chat completion per page with the same prompt, replacing the PDF reference with the rasterized PNG.
+6. Stitches the per-page responses per mode:
+   - **Block OCR** — rejected with HTTP 400 (single-image only; crop client-side first).
+   - **Full-page OCR** — per-page HTML concatenated, each wrapped in `<div data-page="N">...</div>`.
+   - **Layout detection** — per-page JSON arrays merged, every entry gains a `"page": N` field.
+   - **Table recognition** — same as layout.
+   - **Unknown mode** — plaintext concat with `<!-- page N -->` separators.
+7. Returns one final OpenAI-shape chat completion. Extra response fields: `x_surya_pages` (page count), `x_surya_mode` (detected mode), `page_errors` (only present when one or more pages failed — does NOT abort the whole request).
+
+### `dpi_rescale_to` (per-request OpenAI extension)
+
+Caller controls the rasterization DPI via the top-level body field `dpi_rescale_to` (set via `extra_body` on official OpenAI SDK clients):
+
+| Value | Meaning |
+|---|---|
+| `96` (default) | Cap at 96 DPI. Renders at `min(96, native_dpi)` per page — only downscales, never upscales. |
+| `N > 0` | Cap at N DPI. Renders at `min(N, native_dpi)` per page. |
+| `-1` | Skip rescaling. Render at the page's native DPI (vector-only pages still fall back to 96). |
+
+Hard cap: 600 DPI (safety bound — beyond this the vision encoder produces an impractically large input). Anything else returns HTTP 400.
+
+### curl recipes — PDF input
 
 ```bash
-# poppler-utils
+# Single-page PDF as data URL, full-page OCR
+PDF_B64=$(base64 -w0 doc.pdf)
+curl http://localhost:4000/v1/chat/completions \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"model\": \"local-llamacpp-cuda-surya-ocr-2\",
+    \"max_tokens\": 4096,
+    \"temperature\": 0.0,
+    \"messages\": [{
+      \"role\": \"user\",
+      \"content\": [
+        {\"type\": \"image_url\", \"image_url\": {\"url\": \"data:application/pdf;base64,$PDF_B64\"}},
+        {\"type\": \"text\", \"text\": \"OCR this image to HTML. Each block is a div with data-label and data-bbox (x0 y0 x1 y1, normalized 0-1000).\"}
+      ]
+    }]
+  }"
+# → assistant content:
+#   <div data-page="1">
+#     <div data-label="Text" data-bbox="..."><p>...</p></div>
+#   </div>
+# Response top-level: x_surya_pages=1, x_surya_mode="page"
+
+# Multi-page PDF via http URL, layout mode, default DPI (96 cap)
+curl http://localhost:4000/v1/chat/completions \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "local-llamacpp-cuda-surya-ocr-2",
+    "max_tokens": 4096,
+    "temperature": 0.0,
+    "messages": [{
+      "role": "user",
+      "content": [
+        {"type": "image_url", "image_url": {"url": "https://example.com/doc.pdf"}},
+        {"type": "text", "text": "Output the layout of this image as JSON. Each entry is a dict with \"label\", \"bbox\", and \"count\" fields. Bbox is x0 y0 x1 y1, normalized 0-1000."}
+      ]
+    }]
+  }'
+# → assistant content (JSON array, every entry has a `page` field):
+#   [{"label":"SectionHeader","bbox":"...","count":5,"page":1},
+#    {"label":"Text",         "bbox":"...","count":50,"page":1},
+#    {"label":"Text",         "bbox":"...","count":40,"page":2},
+#    ...]
+
+# High-detail scan — render at native DPI (skip the 96 cap)
+curl http://localhost:4000/v1/chat/completions \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"model\": \"local-llamacpp-cuda-surya-ocr-2\",
+    \"max_tokens\": 8192,
+    \"temperature\": 0.0,
+    \"dpi_rescale_to\": -1,
+    \"messages\": [...]
+  }"
+
+# Force a specific cap (e.g. for dense footnotes / math)
+curl ... -d '{..., "dpi_rescale_to": 150, ...}'
+```
+
+### Pre-rasterizing client-side (still supported)
+
+If you'd rather pre-rasterize and send individual PNGs (skipping the wrapper's PDF handler entirely), the recipe is unchanged: render at 96 DPI and POST per page:
+
+```bash
 pdftoppm -png -r 96 -f 1 -l 1 doc.pdf out
-# Python
+# or in Python:
 pip install pdf2image
 python -c 'from pdf2image import convert_from_path; convert_from_path("doc.pdf", dpi=96)[0].save("page-1.png")'
 ```
+
+Pick the server-side path when you don't want pagination logic in your client. Pick client-side when you want fine-grained control over which pages to send, or when you need to process pages in parallel across multiple llamacpp replicas.
+
+### PDF handling is per-model
+
+Server-side PDF orchestration is opt-in via the `"handler": "surya"` field in the model registry — it applies only to `surya-ocr-2`. Other GGUF models (future text-only LLMs, audio-input VLMs, etc.) added to `models.{cpu,cuda}.json` will NOT auto-rasterize PDFs; PDF input on those models is forwarded to llama-server and will fail there. To add a handler for a different document model, drop a new `llamacpp/src/llamacpp_wrap/handlers/<name>.py` implementing the `Handler` protocol from `handlers/base.py` and register it under that name in `handlers/__init__.py`.
 
 ## Throughput — what to expect
 
@@ -335,6 +433,62 @@ Every tunable has a CPU (`LLAMACPP_*`) and CUDA (`LLAMACPP_CUDA_*`) counterpart 
 | `LLAMACPP_MEM_LIMIT` / `LLAMACPP_CUDA_MEM_LIMIT` | `12g` | Container memory limit |
 | `LLAMACPP_CPUS` / `LLAMACPP_CUDA_CPUS` | `4.0` | Container CPU limit |
 | `DATA_DIR_LLAMACPP` | `${DATA_DIR}/llamacpp` | Bind-mount root for the wrapper's `/data` dir. Holds the flat HF-repo layout under `models/<org>/<repo>/<files>` (no blobs/snapshots dedup) — the `llamacpp-pull` sidecar populates this via `huggingface-cli download <repo> --local-dir <path>` reading from BOTH `llamacpp/models.cpu.json` and `models.cuda.json` (union of `repo` fields). Both CPU and CUDA wrappers share the same files. |
+
+## Auto-sizing `--ctx-size` to available memory
+
+Models can opt into supervisor-side auto-sizing of `--ctx-size` against probed free VRAM (CUDA) or RAM (CPU) by passing the literal string `"auto"` instead of an integer:
+
+```jsonc
+"llama_server_args": [
+  "--ctx-size", "auto",
+  "--parallel", "4",
+  "--n-gpu-layers", "999"
+]
+```
+
+At spawn time (every model load — fresh boot, swap from sibling eviction, or post-idle-TTL reload) the supervisor:
+
+1. Probes free memory via `nvidia-smi --query-gpu=memory.free` on CUDA, or `MemAvailable` from `/proc/meminfo` on CPU.
+2. Subtracts the model's declared weights footprint and a safety margin (CUDA-graph alloc, batch buffers, Mamba-SSM state, mmproj scratch — covers what the per-token formula can't model).
+3. Divides the remaining headroom by the per-token KV cache cost.
+4. Caps at the model's trained max context (`max_ctx_size` — going past this wastes memory without quality gain).
+5. Floors at `LLAMACPP_WRAP_CTX_FLOOR` (default 16384) so a tight memory situation doesn't silently shrink ctx to uselessness.
+6. Rounds down to the nearest multiple of 1024.
+
+The resolved value is logged at INFO level for every spawn so you can verify what was picked:
+
+```
+ctx-size auto math: free=10.19 GiB, weights=2.00 GiB, safety=1.00 GiB,
+                    kv_per_tok=12288 B → headroom for 628053 tokens;
+                    model_max=262144, floor=16384, chosen=262144
+ctx-size auto → 262144 (model_id=datalab-to/surya-ocr-2-gguf)
+spawning: /app/llama-server -m ... --ctx-size 262144 --parallel 4 ...
+```
+
+### Per-model fields used by the resolver
+
+All optional. Missing fields fall back to conservative defaults:
+
+| Field | Default | Description |
+|---|---|---|
+| `max_ctx_size` | 16384 | Model's trained context ceiling. For Surya OCR 2 (`qwen3_5_text` architecture) the model card declares `max_position_embeddings=262144`. |
+| `kv_bytes_per_token` | 16384 (16 KiB) | Per-token KV cache cost. For pure-attention transformers: `2 (K+V) × n_layers × n_kv_heads × head_dim × sizeof(cache_dtype)`. For **hybrid Mamba+attention** models (Surya / Qwen3.5 generation) count only full-attention layers — linear/Mamba blocks have constant state. **Surya math**: 6 full-attn layers (24 / `full_attention_interval=4`) × 2 KV heads × 256 head_dim × 2 (K+V) × 2 B (fp16) = **12288 B/token**. |
+| `weights_estimate_bytes` | sum of GGUF + mmproj file sizes on disk | Total memory consumed by weights when fully loaded. Used to budget what's left for the KV cache. Padding above on-disk size accounts for CUDA-side alignment + scratch. |
+
+### Per-deployment overrides (env vars in `.env`, per-variant)
+
+Each setting has separate `LLAMACPP_*` (CPU) and `LLAMACPP_CUDA_*` (CUDA) overrides — the operator-facing names without the `_WRAP_` infix that docker-compose translates to the in-container `LLAMACPP_WRAP_*` form:
+
+| Operator var (in `.env`) | In-container var | Default | Description |
+|---|---|---|---|
+| `LLAMACPP_CTX_FLOOR` / `LLAMACPP_CUDA_CTX_FLOOR` | `LLAMACPP_WRAP_CTX_FLOOR` | `16384` | Never pick a smaller ctx than this. Even if the probe says we don't have room, the supervisor falls back to this and lets the spawn either succeed (under-budget OK) or fail loudly at load. |
+| `LLAMACPP_CTX_SAFETY_MARGIN_BYTES` / `LLAMACPP_CUDA_CTX_SAFETY_MARGIN_BYTES` | `LLAMACPP_WRAP_CTX_SAFETY_MARGIN_BYTES` | `1073741824` (1 GiB) | Subtracted from probed free memory before dividing by KV cost. Bigger margin = smaller chosen ctx but less risk of OOM-at-first-request. Bump this when other CUDA tenants share the same GPU; trim it on a dedicated card. |
+
+### Fallback behavior
+
+If the probe fails entirely (no `nvidia-smi`, no `/proc/meminfo`, command timeout, unparseable output) the supervisor falls back to `min(max_ctx_size, max(floor*2, floor))` and logs a warning. Picks something usable rather than crashing the spawn.
+
+If the probe succeeds but probed memory is already under the weights + safety budget (i.e. another CUDA tenant is eating most of the card), it falls back to `floor` and logs the deficit. Better to attempt the spawn at a small ctx (which often still works since the safety margin is conservative) than refuse.
 
 ## Adding a new model
 

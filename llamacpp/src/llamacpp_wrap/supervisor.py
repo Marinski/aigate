@@ -21,7 +21,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import shutil
 import signal
+import subprocess
 import time
 from typing import Any
 
@@ -35,6 +37,268 @@ log = logging.getLogger("llamacpp_wrap.supervisor")
 
 class SupervisorError(RuntimeError):
     pass
+
+
+# ── auto ctx-size resolution ──────────────────────────────────────────────
+#
+# Model entries may set `--ctx-size auto` in `llama_server_args` to let the
+# supervisor probe free GPU VRAM / system RAM at spawn time and pick the
+# largest `--ctx-size` value that fits, capped at the model's trained
+# `max_ctx_size` (per-model field). Constants below are the operator-tunable
+# knobs that govern the math — overrideable via env so deployments with
+# unusual memory budgets (other CUDA tenants, dedicated containers, etc.)
+# can dial them in without rebuilding the image.
+
+# Floor: never pick a smaller ctx than this. If the probe says we don't have
+# room, we'd rather fail loudly at load-time than serve a 1K-context model.
+_CTX_FLOOR_DEFAULT = 16384
+
+# Safety margin subtracted from probed free memory before dividing by the
+# per-token KV cost. Covers CUDA graph allocation, batch buffers, Mamba-SSM
+# state, mmproj scratch, and other overhead the per-token formula doesn't
+# capture. Conservative default — bigger margin = smaller chosen ctx but
+# less risk of OOM-at-first-request.
+_CTX_SAFETY_MARGIN_DEFAULT_BYTES = 1 * 1024 * 1024 * 1024  # 1 GiB
+
+# Per-model registry fields used here (all optional — missing fields fall
+# back to the conservative defaults below):
+#   max_ctx_size           model's trained context ceiling. Going past
+#                          this wastes memory without benefit. For Surya
+#                          OCR 2 (qwen3_5_text) the model card declares
+#                          max_position_embeddings=262144.
+#   kv_bytes_per_token     per-token KV cache cost in bytes. For pure-
+#                          attention transformers: 2(K+V) * n_layers *
+#                          n_kv_heads * head_dim * sizeof(fp16/cache_dtype).
+#                          For hybrid Mamba+attention models (Surya, Qwen3
+#                          .5 generation): count only full-attention layers
+#                          — linear/Mamba blocks have constant state.
+#   weights_estimate_bytes total memory consumed by model weights + mmproj
+#                          when fully loaded. Used to budget what's left
+#                          for the KV cache. If missing, falls back to
+#                          file-size-on-disk.
+
+_CTX_FALLBACK_KV_BYTES_PER_TOKEN = 16 * 1024  # 16 KiB — conservative
+_CTX_FALLBACK_MAX_CTX_SIZE = 16384
+
+
+def _ctx_floor() -> int:
+    raw = os.environ.get("LLAMACPP_WRAP_CTX_FLOOR", "").strip()
+    if not raw:
+        return _CTX_FLOOR_DEFAULT
+    try:
+        return max(1024, int(raw))
+    except ValueError:
+        log.warning(
+            "LLAMACPP_WRAP_CTX_FLOOR=%r is not an int; falling back to %d",
+            raw,
+            _CTX_FLOOR_DEFAULT,
+        )
+        return _CTX_FLOOR_DEFAULT
+
+
+def _ctx_safety_margin_bytes() -> int:
+    raw = os.environ.get("LLAMACPP_WRAP_CTX_SAFETY_MARGIN_BYTES", "").strip()
+    if not raw:
+        return _CTX_SAFETY_MARGIN_DEFAULT_BYTES
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        log.warning(
+            "LLAMACPP_WRAP_CTX_SAFETY_MARGIN_BYTES=%r is not an int; "
+            "falling back to %d",
+            raw,
+            _CTX_SAFETY_MARGIN_DEFAULT_BYTES,
+        )
+        return _CTX_SAFETY_MARGIN_DEFAULT_BYTES
+
+
+def _probe_free_cuda_vram_bytes() -> int | None:
+    """Returns free VRAM on the first visible GPU in bytes, or None when
+    nvidia-smi isn't reachable. Single-GPU assumption — if the container
+    sees multiple GPUs llama.cpp uses the first one by default and the
+    probe matches that. Multi-GPU layouts would need a per-device probe.
+    """
+    if shutil.which("nvidia-smi") is None:
+        return None
+    try:
+        out = subprocess.run(
+            [
+                "nvidia-smi",
+                "--query-gpu=memory.free",
+                "--format=csv,noheader,nounits",
+                "-i", "0",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+        log.warning("nvidia-smi probe failed: %s", exc)
+        return None
+    line = out.stdout.strip().splitlines()
+    if not line:
+        return None
+    try:
+        mib = int(line[0].strip())
+    except ValueError:
+        log.warning("nvidia-smi returned unparseable %r", line[0])
+        return None
+    return mib * 1024 * 1024
+
+
+def _probe_free_ram_bytes() -> int | None:
+    """Returns MemAvailable from /proc/meminfo in bytes, or None if it
+    isn't readable (e.g. on a non-Linux host or a container without
+    /proc)."""
+    try:
+        with open("/proc/meminfo", "r", encoding="utf-8") as fh:
+            for raw in fh:
+                if raw.startswith("MemAvailable:"):
+                    parts = raw.split()
+                    return int(parts[1]) * 1024
+    except OSError as exc:
+        log.warning("/proc/meminfo probe failed: %s", exc)
+    return None
+
+
+def _gguf_size_on_disk(repo_dir: Any, entry: dict) -> int:
+    """Sum the bytes-on-disk of the model's GGUF + mmproj GGUF (if any).
+    Lossy proxy for actual loaded weight memory — useful as a floor when
+    `weights_estimate_bytes` isn't declared on the model entry."""
+    total = 0
+    for key in ("gguf_file", "mmproj_file"):
+        name = entry.get(key)
+        if not name:
+            continue
+        try:
+            total += (repo_dir / name).stat().st_size
+        except OSError:
+            pass
+    return total
+
+
+def _resolve_auto_ctx_size(
+    *,
+    extra_args: list[str],
+    entry: dict,
+    repo_dir: Any,
+    device: str,
+) -> list[str]:
+    """Substitute every `--ctx-size auto` in `extra_args` with a computed
+    integer value based on free memory + the model's per-token KV cost +
+    its trained max. Returns a new list (does NOT mutate the input).
+
+    If the probe fails or required model fields are missing, falls back
+    to `_CTX_FALLBACK_MAX_CTX_SIZE` and logs a warning. We never silently
+    pick a tiny ctx — that surprise belongs as a config issue, not a
+    runtime mystery.
+    """
+    new_args: list[str] = list(extra_args)
+    i = 0
+    while i < len(new_args):
+        if (
+            new_args[i] == "--ctx-size"
+            and i + 1 < len(new_args)
+            and new_args[i + 1].lower() == "auto"
+        ):
+            chosen = _compute_ctx_size(
+                entry=entry,
+                repo_dir=repo_dir,
+                device=device,
+            )
+            log.info(
+                "ctx-size auto → %d (model_id=%s)",
+                chosen,
+                entry.get("repo", "?"),
+            )
+            new_args[i + 1] = str(chosen)
+            i += 2
+            continue
+        i += 1
+    return new_args
+
+
+def _compute_ctx_size(*, entry: dict, repo_dir: Any, device: str) -> int:
+    """Compute the largest sane `--ctx-size` for this model + this hardware.
+
+    Math:
+        free_for_kv  = probed_free_mem - weights_estimate - safety_margin
+        max_tokens   = free_for_kv // kv_bytes_per_token
+        chosen       = clamp(max_tokens, floor, model_max_ctx)
+        chosen       = chosen rounded down to a multiple of 1024
+    """
+    floor = _ctx_floor()
+    safety = _ctx_safety_margin_bytes()
+    max_ctx = int(entry.get("max_ctx_size") or _CTX_FALLBACK_MAX_CTX_SIZE)
+    kv_per_tok = int(
+        entry.get("kv_bytes_per_token") or _CTX_FALLBACK_KV_BYTES_PER_TOKEN
+    )
+    if kv_per_tok <= 0:
+        log.warning(
+            "model %r has non-positive kv_bytes_per_token=%d; using fallback %d",
+            entry.get("repo", "?"),
+            kv_per_tok,
+            _CTX_FALLBACK_KV_BYTES_PER_TOKEN,
+        )
+        kv_per_tok = _CTX_FALLBACK_KV_BYTES_PER_TOKEN
+    weights = int(
+        entry.get("weights_estimate_bytes")
+        or _gguf_size_on_disk(repo_dir, entry)
+        or 0
+    )
+
+    if device == "cuda":
+        free_mem = _probe_free_cuda_vram_bytes()
+        source = "CUDA VRAM"
+    else:
+        free_mem = _probe_free_ram_bytes()
+        source = "system RAM"
+
+    if free_mem is None:
+        log.warning(
+            "could not probe free %s; falling back to ctx=%d", source, max_ctx
+        )
+        return _round_down_to_kib(max(min(max_ctx, floor * 2), floor))
+
+    free_for_kv = free_mem - weights - safety
+    if free_for_kv <= 0:
+        log.warning(
+            "probed free %s (%d B) is below weights (%d B) + safety (%d B) "
+            "by %d B; falling back to ctx floor=%d",
+            source,
+            free_mem,
+            weights,
+            safety,
+            -free_for_kv,
+            floor,
+        )
+        return _round_down_to_kib(floor)
+
+    max_tokens = free_for_kv // kv_per_tok
+    chosen = min(max_tokens, max_ctx)
+    chosen = max(chosen, floor)
+    chosen = _round_down_to_kib(chosen)
+    log.info(
+        "ctx-size auto math: free=%.2f GiB, weights=%.2f GiB, safety=%.2f GiB, "
+        "kv_per_tok=%d B → headroom for %d tokens; model_max=%d, floor=%d, "
+        "chosen=%d",
+        free_mem / 1024**3,
+        weights / 1024**3,
+        safety / 1024**3,
+        kv_per_tok,
+        max_tokens,
+        max_ctx,
+        floor,
+        chosen,
+    )
+    return chosen
+
+
+def _round_down_to_kib(n: int) -> int:
+    """Round n down to the nearest multiple of 1024. llama.cpp accepts any
+    positive --ctx-size but multiples of 1024 keep batch allocation clean."""
+    return max(1024, (int(n) // 1024) * 1024)
 
 
 class Supervisor:
@@ -123,6 +387,17 @@ class Supervisor:
                 f"model {model_id!r} gguf not found at {gguf_path} — "
                 f"llamacpp-pull must download {repo} first"
             )
+
+        # Resolve any `--ctx-size auto` sentinel in the model's
+        # llama_server_args against current free VRAM/RAM. Runs once per
+        # spawn — recomputed on every model swap so sibling-evicted
+        # services that just freed memory get their headroom counted in.
+        extra_args = _resolve_auto_ctx_size(
+            extra_args=extra_args,
+            entry=entry,
+            repo_dir=repo_dir,
+            device=config.DEVICE or "cpu",
+        )
 
         cmd = [
             str(config.SERVER_BIN),

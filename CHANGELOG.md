@@ -2,6 +2,146 @@
 
 All notable changes to this project are documented here.
 
+## [v3.10.0] — 2026-06-13
+
+llamacpp wrapper grows two coupled features for Surya OCR 2: **server-side PDF input** (so clients don't have to per-page-rasterize) and an **auto `--ctx-size` resolver** (so the server uses the model's full 256K trained context instead of being pinned to a hand-tuned 16K). Both work through a new **per-model handler architecture** so future GGUFs (text LLMs, audio VLMs, document models with different stitching rules) can plug in their own orchestration without polluting the general wrapper path.
+
+### Per-model handler architecture
+
+Models opt in by setting `"handler": "<name>"` in their `models.{cpu,cuda}.json` entry. Handlers are Python classes implementing the `Handler` protocol from `llamacpp/src/llamacpp_wrap/handlers/base.py`:
+
+```python
+class Handler(Protocol):
+    async def handle(
+        self,
+        *,
+        request: Request,
+        payload: dict,
+        forward: Callable[[dict], Awaitable[Response]],
+    ) -> Response | None:
+        """Return a Response to short-circuit, or None to fall through
+        to the default one-shot proxy path."""
+```
+
+The handler receives the inbound request + parsed OpenAI chat completions payload + a `forward(payload)` callable that runs a single `llama-server` round-trip with whatever payload it's given. Handlers can call `forward` 0..N times — once per chunk for modality-aware orchestrators (PDF pagination, audio chunking, etc.).
+
+Registry lives in `handlers/__init__.py` and exposes `get(name) → Handler | None`. Unknown handler names fail at config-load time via the validation in `config.py`. Models without a `handler` field fall through to the default one-shot proxy — every existing or future GGUF model not interested in custom orchestration sees zero behaviour change.
+
+### Surya PDF handler (`handlers/surya.py`)
+
+First handler implementation. Detects PDF input in the OpenAI chat completions payload, rasterizes each page server-side, loops the chat completion per page, and stitches the per-page responses back keyed by Surya's prompt mode.
+
+**PDF detection** — a content item is treated as a PDF when:
+
+- its `image_url.url` is a `data:application/pdf;base64,...` URL, OR
+- its `image_url.url` is an `http(s)://...` URL whose fetched body comes back with `Content-Type: application/pdf` (or `.pdf` extension fallback).
+
+**DPI knob** — per-request `dpi_rescale_to` field on the OpenAI body (set via `extra_body` on official SDK clients):
+
+| Value | Behaviour |
+|---|---|
+| `96` (default) | Cap at 96 DPI. Renders at `min(96, native_dpi)` per page — only downscales, never upscales. |
+| `N > 0` | Cap at N DPI. Renders at `min(N, native_dpi)` per page. |
+| `-1` | Skip rescaling. Render at the page's native DPI (vector-only pages still fall back to 96). |
+
+`native_dpi` per page is the max DPI of any embedded raster image on that page, probed via `pdfimages -list`. Vector-only pages fall back to 96 DPI so `-1` and the default both produce safe + fast renders on those. Hard cap: 600 DPI. Out-of-range → HTTP 400.
+
+**Prompt-mode detection** — handler matches the user's text content against the 4 trained-in Surya prompts to decide how to stitch:
+
+- **Block OCR** — rejected with HTTP 400 (single-image only; crop client-side first).
+- **Full-page OCR** — per-page HTML concatenated, each wrapped in `<div data-page="N">...</div>`.
+- **Layout detection** — per-page JSON arrays merged, every entry gains a `"page": N` field.
+- **Table recognition** — same as layout.
+- **Unknown mode** — plaintext concat with `<!-- page N -->` separators.
+
+**Failure isolation** — one page erroring does NOT abort the whole request. The stitched response gets a `page_errors: [{page, error}, ...]` field so the client can retry just the failed pages.
+
+**Response extra fields** — every PDF response gets `x_surya_pages` (count) and `x_surya_mode` (block / page / layout / table / unknown) at the top level.
+
+### Auto `--ctx-size` resolver
+
+The previous Surya pin was `--ctx-size 16384`. Surya OCR 2 is a Qwen3.5-text hybrid Mamba+attention model whose `config.json` declares `max_position_embeddings=262144` (256K trained context) — but with only 6 full-attention layers (every 4th of 24, `full_attention_interval=4`) and very narrow KV heads (`num_key_value_heads: 2`, `head_dim: 256`). Per-token KV cost works out to **~12 KiB**. On an RTX-class card with even 10 GB free, the full 256K trained context fits with room to spare. Pinning to 16K was leaving the model badly under-utilised and risking truncation on big PDFs from the new server-side PDF handler.
+
+Model entries can now pass the literal string `"auto"` instead of an integer to `--ctx-size`:
+
+```jsonc
+"llama_server_args": [
+  "--ctx-size", "auto",
+  "--parallel", "4",
+  "--n-gpu-layers", "999"
+]
+```
+
+At every model spawn (cold boot, sibling-eviction swap, post-idle-TTL reload) the supervisor:
+
+1. **Probes free memory** — `nvidia-smi --query-gpu=memory.free` on CUDA, `MemAvailable` from `/proc/meminfo` on CPU.
+2. **Subtracts** the model's declared weights footprint + a safety margin (CUDA-graph alloc, batch buffers, Mamba-SSM state, mmproj scratch).
+3. **Divides** the remaining headroom by the per-token KV cache cost.
+4. **Caps** at the model's trained max (`max_ctx_size` per-model field).
+5. **Floors** at `LLAMACPP_WRAP_CTX_FLOOR` (default 16384).
+6. **Rounds down** to the nearest multiple of 1024.
+
+Logs every choice at INFO level:
+
+```
+ctx-size auto math: free=10.19 GiB, weights=2.00 GiB, safety=1.00 GiB,
+                    kv_per_tok=12288 B → headroom for 628053 tokens;
+                    model_max=262144, floor=16384, chosen=262144
+ctx-size auto → 262144 (model_id=datalab-to/surya-ocr-2-gguf)
+spawning: /app/llama-server -m ... --ctx-size 262144 --parallel 4 ...
+```
+
+For Surya on the live aigate stack (sharing the GPU with talkies-cuda + sdcpp-cuda etc.) the resolver picks the **full 262144 trained max** on the first call — verified live.
+
+New per-model fields (all optional):
+
+| Field | Default | Surya pin | Description |
+|---|---|---|---|
+| `max_ctx_size` | 16384 | 262144 | Trained ceiling — going past wastes memory without benefit. |
+| `kv_bytes_per_token` | 16384 (16 KiB) | 12288 | Per-token KV cost. For hybrid Mamba+attention models count only full-attention layers. **Surya math**: 6 full-attn × 2 KV heads × 256 head_dim × 2 (K+V) × 2 B fp16 = 12288 B/token. |
+| `weights_estimate_bytes` | sum of GGUF + mmproj on-disk size | 2 GiB | Total memory consumed by weights when loaded. Padding above on-disk size accounts for CUDA-side alignment + scratch. |
+
+New env knobs (operator overrides on the wrapper container):
+
+| Variable | Default | Description |
+|---|---|---|
+| `LLAMACPP_WRAP_CTX_FLOOR` | `16384` | Smallest ctx the resolver will ever pick. |
+| `LLAMACPP_WRAP_CTX_SAFETY_MARGIN_BYTES` | `1073741824` (1 GiB) | Subtracted from probed free memory before dividing by KV cost. Bump on shared GPUs; trim on dedicated cards. |
+
+Failure modes (all explicit, all logged):
+
+- **No `nvidia-smi` / no `/proc/meminfo`** → falls back to `min(max_ctx_size, max(floor*2, floor))`.
+- **`nvidia-smi` returns unparseable output / times out** → same.
+- **Probed free memory is below weights + safety budget** → falls back to `floor`; spawn proceeds, llama-server fails loudly at load if even that won't fit.
+- **Bad `kv_bytes_per_token` on the model entry (zero / negative)** → falls back to the conservative 16 KiB/token estimate.
+
+### Wrapper image + config changes
+
+- `llamacpp/Dockerfile.{cpu,cuda}` — `poppler-utils` added to apt install (`pdftoppm` + `pdfimages` + `pdfinfo`).
+- `llamacpp/models.{cpu,cuda}.json` — Surya entry now has `"handler": "surya"`, `"max_ctx_size": 262144`, `"kv_bytes_per_token": 12288`, `"weights_estimate_bytes": 2147483648`. The `--ctx-size 16384` arg changed to `--ctx-size auto`.
+- `llamacpp/src/llamacpp_wrap/config.py` — registry validation accepts `handler`, `max_ctx_size`, `kv_bytes_per_token`, `weights_estimate_bytes` (all optional, type-checked).
+- `llamacpp/src/llamacpp_wrap/server.py` — `_handle_json_request` looks up the handler after `SUPERVISOR.ensure()` and short-circuits via `handler.handle(...)` if one exists. New helper `_proxy_one_payload` is what's handed to the handler as the `forward` callable.
+- `llamacpp/src/llamacpp_wrap/supervisor.py` — `_resolve_auto_ctx_size()` runs over `llama_server_args` before `cmd` is built; `_compute_ctx_size()` does the math; `_probe_free_cuda_vram_bytes()` + `_probe_free_ram_bytes()` + `_gguf_size_on_disk()` are the probes. New env knobs read via `_ctx_floor()` + `_ctx_safety_margin_bytes()`.
+- `llamacpp/src/llamacpp_wrap/handlers/{__init__,base,surya}.py` — new module tree, ~500 LOC total.
+
+### Tests — 12 → 23 cases
+
+`tests/test_llamacpp.sh` grew 11 new test functions (5 PDF + 1 auto-ctx, per variant where applicable). 6 PDF tests on CUDA all verified passing. The auto-ctx test asserts the resolver log line landed + the chosen value is ≥ floor + a multiple of 1024.
+
+New fixture: `tests/.fixtures/doc-multipage.pdf` — A4, 3 pages, each with a unique known line. 1.8 KB.
+
+### Docs
+
+- `docs/services/llamacpp.md` — two new sections + one table-row update:
+  - **PDF input — server-side handling** — detection rules, `dpi_rescale_to` knob, 3 worked curl examples, the client-side pre-rasterization path (still supported), and the per-model handler architecture (how to add a handler for another document model).
+  - **Auto-sizing `--ctx-size` to available memory** — the resolver math, 3 per-model fields, the 2 env knobs (per-variant via the same `LLAMACPP_*` / `LLAMACPP_CUDA_*` pattern as other tunables), fallback behaviour, spawn-time log format.
+  - The "Which mode for which job" table — **Multi-page PDF** row now mentions the server-side path FIRST (drop a PDF in `image_url.url`), with client-side pre-rasterization listed as the fallback for fine-grained control.
+- `README.md` — llamacpp CUDA row mentions both the server-side PDF support and the `dpi_rescale_to` knob.
+- `docs/providers.md` — both `local-llamacpp-surya-ocr-2` and `local-llamacpp-cuda-surya-ocr-2` alias rows now mention PDF input, `dpi_rescale_to`, the 256K trained context, and auto-ctx-size.
+- `docs/services/README.md` — services-index blurb for llamacpp gained the PDF + auto-ctx-size summary.
+- `.env.example` — documents `LLAMACPP_CTX_FLOOR` + `LLAMACPP_CTX_SAFETY_MARGIN_BYTES` (CPU) and `LLAMACPP_CUDA_CTX_FLOOR` + `LLAMACPP_CUDA_CTX_SAFETY_MARGIN_BYTES` (CUDA).
+- `docker-compose.yml` — both `llamacpp` and `llamacpp-cuda` service blocks gained the env wiring `LLAMACPP_WRAP_CTX_FLOOR: ${LLAMACPP{,_CUDA}_CTX_FLOOR:-}` and the safety-margin twin, so operator overrides in `.env` actually reach the wrapper process inside the container.
+
 ## [v3.9.2] — 2026-06-13
 
 Docs reorganisation. Two monolithic files were growing unmanageable — `docs/services-reference.md` had hit ~960 lines (18 service sections in one file) and `docs/usage.md` ~780 lines (15 task-keyed sections, each duplicating context the reference file already had). Every new feature was widening both files in parallel. Split into per-feature pages under `docs/services/`.

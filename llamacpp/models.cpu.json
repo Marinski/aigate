@@ -6,12 +6,16 @@
       "gguf_file": "surya-2.gguf",
       "mmproj_file": "surya-2-mmproj.gguf",
       "llama_server_args": [
-        "--ctx-size", "16384",
+        "--ctx-size", "auto",
         "--parallel", "4",
         "--threads", "-1",
         "--n-gpu-layers", "0"
       ],
-      "endpoints": ["chat"]
+      "endpoints": ["chat"],
+      "handler": "surya",
+      "max_ctx_size": 262144,
+      "kv_bytes_per_token": 12288,
+      "weights_estimate_bytes": 2147483648
     }
   }
 }

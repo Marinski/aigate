@@ -129,4 +129,31 @@ def load_registry() -> dict[str, dict]:
                     f"{MODELS_FILE}: model {model_id!r} endpoint {ep!r} must be "
                     f"one of {allowed}"
                 )
+        # Optional per-model orchestration handler. None / missing → default
+        # one-shot proxy path. A string name resolves to a registered
+        # Handler implementation in `llamacpp_wrap.handlers`.
+        handler = entry.get("handler")
+        if handler is not None and not isinstance(handler, str):
+            raise ValueError(
+                f"{MODELS_FILE}: model {model_id!r} 'handler' must be a string or null"
+            )
+        # Optional auto-ctx-size knobs (used when llama_server_args contains
+        # `--ctx-size auto`). All optional; missing fields fall back to
+        # conservative defaults in `supervisor._compute_ctx_size`.
+        for field in (
+            "max_ctx_size",
+            "kv_bytes_per_token",
+            "weights_estimate_bytes",
+        ):
+            value = entry.get(field)
+            if value is None:
+                continue
+            if not isinstance(value, int) or isinstance(value, bool):
+                raise ValueError(
+                    f"{MODELS_FILE}: model {model_id!r} {field!r} must be an int"
+                )
+            if value <= 0:
+                raise ValueError(
+                    f"{MODELS_FILE}: model {model_id!r} {field!r} must be positive"
+                )
     return models

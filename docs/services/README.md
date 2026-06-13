@@ -6,7 +6,7 @@ One file per service. Each file contains the deep reference (endpoints, models, 
 
 | Service | Profile flag(s) | What it does |
 |---|---|---|
-| [llamacpp / llamacpp-cuda](llamacpp.md) | `LLAMACPP=1` / `LLAMACPP_CUDA=1` | GGUF + vision-VLM serving via `llama-server`. Ships **Surya OCR 2** (OCR / layout / table-rec). |
+| [llamacpp / llamacpp-cuda](llamacpp.md) | `LLAMACPP=1` / `LLAMACPP_CUDA=1` | GGUF + vision-VLM serving via `llama-server`. Ships **Surya OCR 2** (OCR / layout / table-rec). Server-side PDF input with per-page rasterization + per-mode stitching, per-request `dpi_rescale_to`, and auto `--ctx-size` (probes free VRAM, picks the largest fitting ctx up to the model's trained max). |
 | [vllm / vllm-cuda](vllm.md) | `VLLM=1` / `VLLM_CUDA=1` | Text LLM + embeddings via `vllm serve`. Ships Nomic Embed v2 + Qwen3-0.6B. |
 | [sd.cpp / sd.cpp-cuda](sdcpp.md) | `SDCPP=1` / `SDCPP_CUDA=1` | Local image generation via stable-diffusion.cpp. |
 | [talkies / talkies-cuda](talkies.md) | `TALKIES=1` / `TALKIES_CUDA=1` | Unified ASR + TTS — Whisper / Canary / Parakeet / Nemotron + Kokoro + Qwen3-TTS. |
