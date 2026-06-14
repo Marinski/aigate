@@ -2,6 +2,93 @@
 
 All notable changes to this project are documented here.
 
+## [v3.11.0] — 2026-06-14
+
+New service `piston` (sandboxed multi-language code execution) + a whole-package security/correctness pass triggered by a brutal review across every line of code, every doc, every config. 11 concrete defects found and fixed; 7 broken doc links repaired; supply-chain audit completed.
+
+### New service: piston
+
+[`engineer-man/piston`](https://github.com/engineer-man/piston) — sandboxed multi-language code execution. Unlocks "the LLM writes code, the LLM runs it" workflows for any function-calling model in aigate's catalog. nsjail-based per-execution isolation, hard wall-clock + memory + output caps, network disabled inside sandboxes by default.
+
+**Pre-bake architecture.** Languages are installed at IMAGE BUILD TIME, not runtime. The `piston/Dockerfile` spawns the upstream piston API server during build, POSTs `/api/v2/packages` once per `(language, version)` from `PISTON_LANGUAGES`, then bakes the result into the image. In exchange the runtime container lives on `aigate-internal` ONLY (no outbound network — a popped neighbour container in `aigate-public` can't reach `piston:2000` directly to spawn arbitrary code execution). Adding a language = bump `PISTON_LANGUAGES`, rebuild, redeploy.
+
+Default language set is intentionally minimal: `python=3.12.0,node=20.11.1`. Other languages exist in piston's pkgs index but most are stuck at 2021-2023 versions (Go 1.16, Rust 1.68, Java 15, Ruby 3.0, Swift 5.3). Add via `PISTON_LANGUAGES` if you actually need them; the trade-off is documented in `.env.example`.
+
+**Isolation model.**
+
+```
+host
+└── piston container (privileged: true) ← needs caps to set up nsjail
+    └── nsjail subprocess per execution ← THIS is where the sandbox is
+        ├── new user namespace (code runs as uid 65534)
+        ├── chroot to minimal language runtime only
+        ├── new pid + mount + uts + ipc + net namespaces
+        ├── seccomp filters blocking dangerous syscalls
+        ├── cgroups: cpu, memory, pids, wall-clock all hard-capped
+        └── no /proc, no /sys, no host paths visible
+```
+
+`privileged: true` is what piston needs to set up nsjail — not what isolates the code itself. The sandboxing happens in the nsjail subprocess. For aigate's threat model (trusted operator + bearer-auth-gated public endpoint + sandboxed code from LLM agents) this is acceptable. For stronger isolation: dedicated VM or Firecracker-microVM-based execution.
+
+**Auth.** Upstream piston has NO built-in auth. The `/piston/` nginx route gates with `if ($http_authorization != "Bearer ${AIGATE_TOKEN}") { return 401 }`. New `RATELIMIT_PISTON=30r/m` zone + `TIMEOUT_PISTON=2m`. Client `Authorization` header is stripped before the proxy hop (`proxy_set_header Authorization ""`) so `AIGATE_TOKEN` never reaches the piston process.
+
+**MCP tool — `mcp_tools-execute_code`.** Function-callable from any LLM in LiteLLM's catalog via `/mcp/`. Signature: `execute_code(language, source, stdin?, args?) → {language, version, stdout, stderr, exit_code, signal, cpu_time_ms, wall_time_ms, memory_bytes, compile_stderr?, compile_exit_code?}`. The tool resolves the requested `language` against `/api/v2/runtimes` dynamically and dispatches `POST /api/v2/execute`. If the language isn't installed, the error response includes the actual installed list so the LLM can pick again — no hardcoded language list in the tool description (the prior draft lied when default ≠ pre-baked set).
+
+**Tests — 8 cases, all green live.**
+
+- `test_piston_route_requires_auth` — both missing-header AND wrong-token cases return 401 (prior version only tested missing header, would have let a broken nginx `if` regression slip through)
+- `test_piston_runtimes_listed` — python + node present in `/api/v2/runtimes`
+- `test_piston_python_execute` / `test_piston_node_execute`
+- `test_piston_sandbox_no_network` — sandboxed `urllib.urlopen()` fails with NXDOMAIN (verifies `PISTON_DISABLE_NETWORKING` is actually effective at the nsjail layer)
+- `test_piston_mcp_tool_registered` / `test_piston_mcp_tool_call`
+- `test_piston_e2e_groq_drives_execute_code` — full agentic loop: ask `groq-llama-3.3-70b` to compute SHA-256 of `"aigate-piston-2026"` with the `execute_code` tool in `tools[]`. Verifies (1) LLM emits a `tool_call` with Python source, (2) MCP dispatches to piston, (3) sandbox runs the code, (4) returned hex matches expected `38a24fbf70116be5d8ee0e0cdc66e524472ae9ad99ffa317e44f5b1ecb809121` byte-for-byte.
+
+### Security hardening (brutal-review fallout)
+
+After spawning a full architecture-security review across the whole package, 9 of 12 findings were verified and fixed (2 rejected with documented reasoning, 1 design-by-intent kept but documented).
+
+- **SSRF guard on llamacpp `image_url` fetches.** The wrapper lives on `aigate-internal` and can hostname-reach every other service. Before this fix, a caller authenticated to LiteLLM could pass `image_url.url=http://postgres:5432` (or any internal hostname / loopback / link-local / reserved address) and the wrapper would TCP-connect and base64-encode whatever came back. Now: shared `_net.py` helper resolves the URL's host before issuing the GET and refuses any address in `is_private`, `is_loopback`, `is_link_local`, `is_multicast`, `is_reserved`, or `is_unspecified` ranges. Applied at BOTH call sites — the wrapper's default `image_url` path AND the Surya OCR 2 handler's separate PDF fetch path. Override via `LLAMACPP_WRAP_ALLOW_PRIVATE_IMAGE_URLS=true` for dev/loopback-only deployments.
+- **`no-new-privileges:true` added to claudebox, pibox-zai, ollama, ollama-cuda.** README's old claim "all containers run with no-new-privileges:true" was materially false — claudebox and pibox-zai (the two containers that expose shell execution) lacked the flag. Now: all four set it. README is qualified to call out the two genuine exceptions (`piston` needs `privileged:true` for nsjail; `tailscale` needs `NET_ADMIN` for the userspace tun device).
+- **Authorization header stripped before piston proxy hop.** `proxy_set_header Authorization "";` inside the `/piston/` nginx block so `AIGATE_TOKEN` never lands in any future piston request log.
+- **`resource_manager` cancel-path semaphore release.** If `asyncio.gather(*_UNLOAD_FNS, return_exceptions=True)` is cancelled by an outer cancellation while the hardware semaphore is held, `return_exceptions=True` does NOT suppress the gather's own `CancelledError`. Without explicit handling, the semaphore would stay acquired until LiteLLM restarted. Added `try/except BaseException` wrapping the unload phase: on cancel, release the semaphore via the contextvar path before re-raising. Belt-and-braces against the LiteLLM `async_log_failure_event` hook not always firing on the cancelled-mid-pre-call path.
+- **`resource_manager` talkies unload lists synced to provider YAML.** `_TALKIES_CPU_MODELS` was 4 entries vs talkies.yaml's 6 — `nemotron-3.5-asr-0.6b` and `kokoro-82m-nvidia` were silently NOT being evicted under RAM pressure. `_TALKIES_CUDA_MODELS` was 8 vs 14 — same problem extended across the qwen3-tts family (`-0.6b-custom`, `-1.7b`, `-1.7b-custom`, `-1.7b-design`, plus `nemotron-3.5-asr-0.6b` and `kokoro-82m-nvidia`). Both lists now match the provider YAML byte-for-byte.
+
+### Bug fixes
+
+- **`litellm/config/fallbacks.json` — 20+ dead `local-speaches-*` refs + 4 dead `local-qwen3-cuda-tts` refs.** Speaches was migrated to talkies releases ago; the qwen3 alias was renamed to `local-talkies-cuda-qwen3-tts-*`. All fallback chains rewritten to reference live talkies slugs (`local-talkies-whisper-large-v3{,-turbo}`, `local-talkies-{cuda-,}whisper-large-v3{,-turbo}`, `local-talkies-kokoro-tts`, `local-talkies-kokoro-82m-nvidia`, `local-talkies-cuda-qwen3-tts-0.6b/1.7b`). Previously broken fallback legs (silent no-ops) now route to real models.
+- **`mcp/server.py` — `search_web` `num_results` unbounded.** A caller could pass `num_results=100000` and slice that many entries off whatever SearXNG returned. Now capped at `max(1, min(num_results, 100))`. No behavior change for normal usage.
+- **`mcp/server.py` — `execute_code` description.** Old description hardcoded `python, javascript (node), bash, deno, go, rust, typescript` as "currently available" but default install is python + node only — LLMs reading the description would generate tool calls for languages that don't exist. Description now omits the language list entirely and points the LLM at the runtime error response (which includes the actual installed list) when a wrong language is picked.
+
+### Docs
+
+- **README.md** — Piper / Speaches references (5 places) removed. Provider list updated to current set (Ollama + talkies + vllm-wrap + llamacpp-wrap + sdcpp + audiolla + predictalot). "No new privileges" claim qualified for piston + tailscale carve-outs. Talkies pre-download note updated.
+- **`docs/services/piston.md`** — new full service page (quick start, default language set + how to customize with the staleness audit per language, isolation model with threat table, per-execution config knobs, service-level config, nginx route config, REST endpoint reference, MCP tool signature, upstream digest bump procedure).
+- **`docs/services/README.md`** — new "Agent execution tooling" section with piston.
+- **`docs/README.md`** — top-level "Start here" navigation mentions piston.
+- **`docs/services/resource-management.md` → `docs/resource-management.md`** — moved out of `services/` because it's cross-cutting LiteLLM callback logic, not a service.
+- **`docs/services-reference.md` + `docs/usage.md` — deleted.** Previously these were redirect stubs after the v3.10.0 docs reorg. Stubs that say "moved" are not docs; every inbound link was rewritten in v3.10.0 anyway.
+- **7 broken relative links in `docs/services/*.md` repaired** — `mcp-tools.md` → `../mcp-tools.md` (5 service files), `../.env.example` → `../../.env.example` (audiolla + predictalot), two self-referencing `<svc>.md#configuration` collapsed to bare `#configuration` anchors.
+
+### Files
+
+- `CHANGELOG.md` — this entry.
+- `README.md` — service overview + security claim qualification + provider list update.
+- `Makefile` — `PISTON=1` profile autodetect block.
+- `.env.example` — `PISTON=`, `PISTON_LANGUAGES=python=3.12.0,node=20.11.1` + every piston tunable + the isolation/threat trade-off documentation.
+- `docker-compose.yml` — new `piston` service block + new `/piston/` nginx location block + new `RATELIMIT_PISTON` zone + `mcp` service gains `PISTON_URL` + `no-new-privileges:true` added to claudebox, pibox-zai, ollama, ollama-cuda + `proxy_set_header Authorization ""` in `/piston/`.
+- `piston/Dockerfile` + `piston/prebake-install.sh` (new) — build-time language pre-bake.
+- `mcp/server.py` — new `execute_code` MCP tool gated on `PISTON_URL` + `search_web` num_results cap + `execute_code` description no longer lies.
+- `llamacpp/src/llamacpp_wrap/_net.py` (new) — shared SSRF guard helper.
+- `llamacpp/src/llamacpp_wrap/server.py` — `_fetch_as_data_url` calls the SSRF guard.
+- `llamacpp/src/llamacpp_wrap/handlers/surya.py` — `_maybe_pdf_bytes` calls the SSRF guard before the HTTP PDF fetch.
+- `litellm/callbacks/resource_manager.py` — talkies CPU+CUDA unload lists synced to provider YAML + try/except BaseException wrapping the pre_call unload phase to release the semaphore on cancellation.
+- `litellm/config/fallbacks.json` — stale `local-speaches-*` / `local-qwen3-cuda-tts` entries rewritten to talkies equivalents.
+- `tests/test_piston.sh` (new) — 8 test cases including the LLM-driven SHA-256 e2e.
+- `docs/services/piston.md` (new), `docs/services/README.md`, `docs/README.md`, `docs/services/{audiolla,claudebox,librechat,mailbox,mcp,predictalot,searxng,telethon}.md`, `docs/mcp-tools.md` — broken-link repair + content tweaks.
+- `docs/services/resource-management.md` → `docs/resource-management.md` — moved (not a service).
+- `docs/services-reference.md`, `docs/usage.md` — deleted (stale redirect stubs).
+- `.gitignore` — `BRUTAL_REVIEW.md` + `COUNTER_REVIEW.md` added to the dev-doc ignore list.
+
 ## [v3.10.0] — 2026-06-13
 
 llamacpp wrapper grows two coupled features for Surya OCR 2: **server-side PDF input** (so clients don't have to per-page-rasterize) and an **auto `--ctx-size` resolver** (so the server uses the model's full 256K trained context instead of being pinned to a hand-tuned 16K). Both work through a new **per-model handler architecture** so future GGUFs (text LLMs, audio VLMs, document models with different stitching rules) can plug in their own orchestration without polluting the general wrapper path.

@@ -27,6 +27,13 @@ HYBRIDS3_KEY = os.environ.get("HYBRIDS3_UPLOAD_KEY", "")
 HYBRIDS3_BUCKET = os.environ.get("HYBRIDS3_BUCKET", "uploads")
 PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "")
 
+# piston — sandboxed code execution. In-network base URL skips the
+# nginx bearer-auth check (the mcp service is on aigate-internal and
+# can hit piston:2000 directly). The aigate-side guard is that the
+# /mcp/ endpoint itself is bearer-auth-gated, so an unauthenticated
+# caller can't reach this tool to drive piston.
+PISTON_URL = os.environ.get("PISTON_URL", "")
+
 HF_INFERENCE_BASE = "https://router.huggingface.co/hf-inference/models"
 
 MIME_TO_EXT = {
@@ -167,9 +174,10 @@ log(f"Image models: {image_names or '(none)'}")
 log(f"TTS models:   {tts_names or '(none)'}")
 log(f"Defaults:     image={image_default}, tts={tts_default}")
 log(f"SearXNG:      {SEARXNG_URL or '(disabled)'}")
+log(f"piston:       {PISTON_URL or '(disabled)'}")
 
-if not image_models and not tts_models and not SEARXNG_URL:
-    log("ERROR: no image/TTS models and no SearXNG — nothing to serve")
+if not image_models and not tts_models and not SEARXNG_URL and not PISTON_URL:
+    log("ERROR: no image/TTS models and no SearXNG and no piston — nothing to serve")
     sys.exit(1)
 
 
@@ -418,6 +426,10 @@ if SEARXNG_URL:
         query: str,
         num_results: int = 10,
     ) -> list[TextContent]:
+        # Cap num_results so a callerlike "give me 100000 results" can't
+        # explode the response payload or thrash SearXNG. SearXNG itself
+        # serves ~10 per page; this slice is over whatever it returned.
+        num_results = max(1, min(num_results, 100))
         params = {
             "q": query,
             "format": "json",
@@ -458,6 +470,135 @@ if SEARXNG_URL:
 
 else:
     log("SEARXNG_URL not set — search_web tool disabled")
+
+
+# ── Tool: execute_code ──────────────────────────────────────────
+
+if PISTON_URL:
+    # Description is intentionally LLM-prompted — these strings shape
+    # how the model decides to invoke the tool. Concrete examples +
+    # language list + return-shape doc help a lot.
+    # Language list is intentionally NOT hardcoded into the description —
+    # the available set depends on PISTON_LANGUAGES at image build time and
+    # would otherwise drift the moment an operator adds or removes a runtime.
+    # If the model picks an unavailable language, the runtime guard below
+    # returns the actual installed list in its error message — that's the
+    # source of truth.
+    _exec_desc = (
+        "Execute code in a sandboxed environment via piston. Use this when "
+        "you need to RUN code (compute a result, transform data, verify an "
+        "algorithm, parse text, generate a result deterministically) rather "
+        "than guess at it. Returns the program's stdout, stderr, exit code, "
+        "and runtime metrics. The sandbox has NO network access by default "
+        "(outbound HTTP/DNS will fail). Wall-clock and memory are hard-"
+        "capped; long-running infinite loops are killed.\n\n"
+        "If you don't know which `language` value to pass: try `python` "
+        "first — it's installed in every aigate deployment. If the runtime "
+        "isn't installed, the error response will include the available "
+        "languages list; pick from there. Use a language name (e.g. "
+        "`python`, `javascript`, `node`, `go`) — version is resolved "
+        "automatically.\n\n"
+        "Common pitfalls: (1) the sandbox has no filesystem you can persist "
+        "to between calls — each invocation is fresh. (2) `stdin` is "
+        "available if you pass it. (3) `print()` / `console.log()` etc. is "
+        "how you get output back; the return value of expressions is NOT "
+        "captured automatically.\n\n"
+        "Returns JSON: {language, version, stdout, stderr, exit_code, "
+        "cpu_time_ms, wall_time_ms, memory_bytes, signal?}."
+    )
+
+    @mcp.tool(name="execute_code", description=_exec_desc)
+    async def execute_code(
+        language: str,
+        source: str,
+        stdin: str = "",
+        args: list[str] | None = None,
+    ) -> list[TextContent]:
+        # Resolve the language version dynamically by hitting
+        # /api/v2/runtimes — piston requires both `language` and
+        # `version` on the execute call, but the model only needs to
+        # know the language name. We pick the latest installed version
+        # of the requested language (or alias).
+        try:
+            async with httpx.AsyncClient(timeout=30) as client:
+                rt_resp = await client.get(f"{PISTON_URL}/api/v2/runtimes")
+                rt_resp.raise_for_status()
+                runtimes = rt_resp.json()
+        except Exception as exc:
+            return [TextContent(type="text", text=json.dumps({
+                "error": f"could not list piston runtimes: {exc}",
+            }))]
+
+        lang_lower = language.lower().strip()
+        matched = None
+        for rt in runtimes:
+            if rt.get("language", "").lower() == lang_lower:
+                matched = rt
+                break
+            for alias in rt.get("aliases", []) or []:
+                if alias.lower() == lang_lower:
+                    matched = rt
+                    break
+            if matched:
+                break
+
+        if matched is None:
+            available = sorted({rt["language"] for rt in runtimes})
+            return [TextContent(type="text", text=json.dumps({
+                "error": (
+                    f"language {language!r} is not installed. Available: "
+                    f"{available}"
+                ),
+            }))]
+
+        body = {
+            "language": matched["language"],
+            "version": matched["version"],
+            "files": [{"content": source}],
+        }
+        if stdin:
+            body["stdin"] = stdin
+        if args:
+            body["args"] = list(args)
+
+        try:
+            async with httpx.AsyncClient(timeout=120) as client:
+                exec_resp = await client.post(
+                    f"{PISTON_URL}/api/v2/execute",
+                    json=body,
+                )
+                exec_resp.raise_for_status()
+                payload = exec_resp.json()
+        except httpx.HTTPStatusError as exc:
+            return [TextContent(type="text", text=json.dumps({
+                "error": f"piston HTTP {exc.response.status_code}",
+                "body": exc.response.text[:1000],
+            }))]
+        except Exception as exc:
+            return [TextContent(type="text", text=json.dumps({
+                "error": f"piston call failed: {exc}",
+            }))]
+
+        run = payload.get("run") or {}
+        result = {
+            "language": payload.get("language", matched["language"]),
+            "version": payload.get("version", matched["version"]),
+            "stdout": run.get("stdout", ""),
+            "stderr": run.get("stderr", ""),
+            "exit_code": run.get("code"),
+            "signal": run.get("signal"),
+            "cpu_time_ms": run.get("cpu_time"),
+            "wall_time_ms": run.get("wall_time"),
+            "memory_bytes": run.get("memory"),
+        }
+        compile_block = payload.get("compile")
+        if compile_block:
+            result["compile_stderr"] = compile_block.get("stderr", "")
+            result["compile_exit_code"] = compile_block.get("code")
+        return [TextContent(type="text", text=json.dumps(result))]
+
+else:
+    log("PISTON_URL not set — execute_code tool disabled")
 
 
 # ── Main ────────────────────────────────────────────────────────

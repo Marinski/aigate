@@ -31,6 +31,7 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 from . import config
 from . import handlers
+from ._net import allow_private_fetch, is_blocked_host
 from .logging import configure as configure_logging
 from .supervisor import Supervisor, SupervisorError
 
@@ -312,8 +313,31 @@ def _ext_to_mime(url: str, content_type: str | None) -> str:
 async def _fetch_as_data_url(url: str, client: httpx.AsyncClient) -> str:
     """GET `url`, base64-encode the body, return a `data:<mime>;base64,...`
     string. Raises `HTTPException` on fetch errors so the caller's outer
-    handler turns into a 4xx/5xx with a readable detail."""
+    handler turns into a 4xx/5xx with a readable detail.
+
+    SSRF guard: refuses any URL whose host resolves to a private / loopback /
+    link-local / reserved IP range unless
+    LLAMACPP_WRAP_ALLOW_PRIVATE_IMAGE_URLS=true is set.
+    """
     import base64
+    from urllib.parse import urlparse
+
+    if not allow_private_fetch():
+        parsed = urlparse(url)
+        if parsed.scheme not in ("http", "https"):
+            raise HTTPException(
+                status_code=400,
+                detail=f"image_url scheme {parsed.scheme!r} not allowed",
+            )
+        host = parsed.hostname or ""
+        if not host:
+            raise HTTPException(
+                status_code=400,
+                detail=f"image_url {url!r} has no host",
+            )
+        blocked, reason = is_blocked_host(host)
+        if blocked:
+            raise HTTPException(status_code=400, detail=reason)
 
     try:
         r = await client.get(

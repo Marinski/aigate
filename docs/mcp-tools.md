@@ -69,7 +69,7 @@ Available actions (each is one step within `run_script`):
 - Browser sessions are sticky — each MCP session is pinned to one replica by `Mcp-Session-Id` header. Maintain session continuity across tool calls within a conversation.
 - `system_click` / `system_type` use OS-level input simulation (PyAutoGUI) — completely undetectable, as they bypass CDP entirely.
 - For page parsing, `get_interactive_elements` returns coordinates alongside element metadata, so you can click by coordinates instead of guessing CSS selectors.
-- The same actions are also available individually via the browser REST API at `/stealthy-auto-browse/` — see [usage.md](usage.md) for REST API examples.
+- The same actions are also available individually via the browser REST API at `/stealthy-auto-browse/` — see [the browser service page](services/browser.md) for REST API examples.
 
 ## hybrids3 (`HYBRIDS3=1`)
 
@@ -196,7 +196,7 @@ If an invalid model is requested, the tool returns an error JSON with the list o
 
 MCP server backed by [docker-telethon-plus](https://github.com/psyb0t/docker-telethon-plus). Gives any function-calling model full Telegram client access — read and send messages, manage groups, forward files.
 
-Requires `TELETHON_API_ID`, `TELETHON_API_HASH`, and `TELETHON_SESSION` in `.env`. See [services-reference.md](services-reference.md#telethon-optional-telethon1) for setup.
+Requires `TELETHON_API_ID`, `TELETHON_API_HASH`, and `TELETHON_SESSION` in `.env`. See [the Telethon service page](services/telethon.md) for setup.
 
 All chat references accept: `@username`, phone number, `t.me/...` link, or numeric ID as a string.
 
@@ -236,7 +236,7 @@ Naming convention: model slug dashes/dots become underscores (`sundial-base-128m
 - samples type: `context`, `horizon`, `num_samples=None`, `context_length=None`, `unload=False`.
 - `forecast_<type>_ensemble`: same as the per-model tool minus `model`, plus `weights: dict[str, float] | None = None`. Weight 0 disables that member; omitted entries default to 1.
 
-See [services-reference.md](services-reference.md#predictalot-optional-predictalot1-or-predictalot_cuda1) for per-model trade-offs and accuracy benchmarks.
+See [the predictalot service page](services/predictalot.md) for per-model trade-offs and accuracy benchmarks.
 
 ### Tools by forecast type
 
@@ -269,7 +269,7 @@ Via LiteLLM's `/mcp/` aggregator each tool is prefixed `predictalot-` (e.g. `pre
 
 MCP server backed by [docker-mailbox](https://github.com/psyb0t/docker-mailbox). Flat tool set across all configured accounts — every per-account tool takes a `mailbox` argument (name or address). Same bearer/HTTP wire shape, one MCP catalog regardless of how many inboxes are configured.
 
-See [services-reference.md](services-reference.md#mailbox-optional-mailbox1) for the full setup (config schema, credentials handling, host bind-mount).
+See [the mailbox service page](services/mailbox.md) for the full setup (config schema, credentials handling, host bind-mount).
 
 ### Tools
 

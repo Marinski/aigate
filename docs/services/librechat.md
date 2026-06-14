@@ -67,7 +67,7 @@ Enable with `LIBRECHAT=1` in `.env`. Access at `http://localhost:4000/librechat/
 
 ### Configuration
 
-All settings are customizable via `.env` — see [services-reference.md](services-reference.md#librechat-optional-librechat1) for the full list of environment variables.
+All settings are customizable via `.env` — see [the LibreChat service page](librechat.md) for the full list of environment variables.
 
 The LibreChat config file at `librechat/librechat.yaml` controls endpoints, MCP servers, and interface settings. Edit it directly for advanced customization (e.g. adding more MCP servers, changing interface options).
 

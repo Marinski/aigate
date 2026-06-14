@@ -803,51 +803,53 @@
     ]
   },
   {
-    "local-speaches-whisper-distil-large-v3": [
-      "local-speaches-parakeet-tdt-0.6b",
-      "local-speaches-cuda-whisper-distil-large-v3",
+    "local-talkies-whisper-large-v3": [
+      "local-talkies-whisper-large-v3-turbo",
+      "local-talkies-cuda-whisper-large-v3",
       "groq-whisper-large-v3-turbo",
       "groq-whisper-large-v3",
       "openai-whisper"
     ]
   },
   {
-    "local-speaches-parakeet-tdt-0.6b": [
-      "local-speaches-whisper-distil-large-v3",
-      "local-speaches-cuda-parakeet-tdt-0.6b",
+    "local-talkies-whisper-large-v3-turbo": [
+      "local-talkies-whisper-large-v3",
+      "local-talkies-cuda-whisper-large-v3-turbo",
       "groq-whisper-large-v3-turbo",
       "groq-whisper-large-v3",
       "openai-whisper"
     ]
   },
   {
-    "local-speaches-cuda-whisper-distil-large-v3": [
-      "local-speaches-cuda-parakeet-tdt-0.6b",
-      "local-speaches-whisper-distil-large-v3",
+    "local-talkies-cuda-whisper-large-v3": [
+      "local-talkies-cuda-whisper-large-v3-turbo",
+      "local-talkies-whisper-large-v3",
       "groq-whisper-large-v3-turbo",
       "groq-whisper-large-v3",
       "openai-whisper"
     ]
   },
   {
-    "local-speaches-cuda-parakeet-tdt-0.6b": [
-      "local-speaches-cuda-whisper-distil-large-v3",
-      "local-speaches-parakeet-tdt-0.6b",
+    "local-talkies-cuda-whisper-large-v3-turbo": [
+      "local-talkies-cuda-whisper-large-v3",
+      "local-talkies-whisper-large-v3-turbo",
       "groq-whisper-large-v3-turbo",
       "groq-whisper-large-v3",
       "openai-whisper"
     ]
   },
   {
-    "local-speaches-kokoro-tts": [
-      "local-qwen3-cuda-tts",
+    "local-talkies-kokoro-tts": [
+      "local-talkies-kokoro-82m-nvidia",
+      "local-talkies-cuda-qwen3-tts-0.6b",
       "openai-tts-1",
       "openai-tts-1-hd"
     ]
   },
   {
-    "local-qwen3-cuda-tts": [
-      "local-speaches-kokoro-tts",
+    "local-talkies-cuda-qwen3-tts-0.6b": [
+      "local-talkies-cuda-qwen3-tts-1.7b",
+      "local-talkies-kokoro-tts",
       "openai-tts-1",
       "openai-tts-1-hd"
     ]
@@ -856,7 +858,7 @@
     "voxtral-small": [
       "groq-whisper-large-v3-turbo",
       "groq-whisper-large-v3",
-      "local-speaches-whisper-distil-large-v3",
+      "local-talkies-whisper-large-v3",
       "openai-whisper"
     ]
   },
@@ -864,7 +866,7 @@
     "groq-whisper-large-v3": [
       "groq-whisper-large-v3-turbo",
       "voxtral-small",
-      "local-speaches-whisper-distil-large-v3",
+      "local-talkies-whisper-large-v3",
       "openai-whisper"
     ]
   },
@@ -872,7 +874,7 @@
     "groq-whisper-large-v3-turbo": [
       "groq-whisper-large-v3",
       "voxtral-small",
-      "local-speaches-whisper-distil-large-v3",
+      "local-talkies-whisper-large-v3-turbo",
       "openai-whisper"
     ]
   },
@@ -881,21 +883,21 @@
       "groq-whisper-large-v3-turbo",
       "groq-whisper-large-v3",
       "voxtral-small",
-      "local-speaches-whisper-distil-large-v3"
+      "local-talkies-whisper-large-v3"
     ]
   },
   {
     "openai-tts-1": [
       "openai-tts-1-hd",
-      "local-speaches-kokoro-tts",
-      "local-qwen3-cuda-tts"
+      "local-talkies-kokoro-tts",
+      "local-talkies-cuda-qwen3-tts-0.6b"
     ]
   },
   {
     "openai-tts-1-hd": [
       "openai-tts-1",
-      "local-speaches-kokoro-tts",
-      "local-qwen3-cuda-tts"
+      "local-talkies-kokoro-tts",
+      "local-talkies-cuda-qwen3-tts-0.6b"
     ]
   },
   {

@@ -128,6 +128,11 @@ ifeq ($(strip $(LLAMACPP_CUDA)),1)
   _PROFILES += llamacpp-cuda
 endif
 
+# piston: opt-in with PISTON=1 (sandboxed multi-language code execution)
+ifeq ($(strip $(PISTON)),1)
+  _PROFILES += piston
+endif
+
 # mailbox: opt-in with MAILBOX=1
 ifeq ($(strip $(MAILBOX)),1)
   _PROFILES += mailbox

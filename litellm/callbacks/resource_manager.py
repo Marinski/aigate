@@ -188,9 +188,11 @@ async def _unload_cpu_img():
             logger.warning("[resource_manager] cpu-img unload error: %s", e)
 
 
-# talkies — unified ASR + TTS; DELETE /api/ps/{model_id} per model. CUDA has
-# the full set (whisper × 2, parakeet, canary × 3, Kokoro, Qwen3-TTS), CPU
-# a subset (whisper variants + canary-180m-flash + Kokoro).
+# talkies — unified ASR + TTS; DELETE /api/ps/{model_id} per model. Lists
+# must stay in sync with the model_name set in
+# litellm/config/providers/talkies{,-cuda}.yaml (which mirrors the
+# talkies image's enabled ENABLE_<MODEL> flag set). When adding a model
+# upstream, also add it here so the resource_manager actually evicts it.
 _TALKIES_CUDA_URL = "http://talkies-cuda:8000"
 _TALKIES_CPU_URL = "http://talkies:8000"
 _TALKIES_CUDA_MODELS = [
@@ -200,14 +202,22 @@ _TALKIES_CUDA_MODELS = [
     "canary-180m-flash",
     "canary-1b-flash",
     "canary-qwen-2.5b",
+    "nemotron-3.5-asr-0.6b",
     "kokoro-82m",
+    "kokoro-82m-nvidia",
     "qwen3-tts-0.6b",
+    "qwen3-tts-1.7b",
+    "qwen3-tts-0.6b-custom",
+    "qwen3-tts-1.7b-custom",
+    "qwen3-tts-1.7b-design",
 ]
 _TALKIES_CPU_MODELS = [
     "whisper-large-v3",
     "whisper-large-v3-turbo",
     "canary-180m-flash",
+    "nemotron-3.5-asr-0.6b",
     "kokoro-82m",
+    "kokoro-82m-nvidia",
 ]
 
 
@@ -407,28 +417,46 @@ class ResourceManager(CustomLogger):
             data.setdefault("metadata", {})[_METADATA_KEY] = hw
             _held_hw.set(hw)
 
-        if group in _ALL_CUDA_GROUPS:
-            competing = _ALL_CUDA_GROUPS - {group}
-        else:
-            competing = _ALL_CPU_GROUPS - {group}
+        # From here on the semaphore is HELD. Any exception (including
+        # CancelledError on a client disconnect) must release it — LiteLLM's
+        # async_log_failure_event is not guaranteed to fire on every cancel
+        # path. The contextvar is already set so _release_sem() does the
+        # right thing.
+        try:
+            if group in _ALL_CUDA_GROUPS:
+                competing = _ALL_CUDA_GROUPS - {group}
+            else:
+                competing = _ALL_CPU_GROUPS - {group}
 
-        logger.warning(
-            "[resource_manager] group=%s unloading competing: %s", group, competing
-        )
+            logger.warning(
+                "[resource_manager] group=%s unloading competing: %s", group, competing
+            )
 
-        results = await asyncio.gather(
-            *[_UNLOAD_FNS[g]() for g in competing],
-            return_exceptions=True,
-        )
+            # NOTE: asyncio.gather(..., return_exceptions=True) suppresses
+            # exceptions raised INSIDE the child coroutines but NOT a
+            # CancelledError delivered to the gather itself (i.e. the outer
+            # task is cancelled). That path is covered by the surrounding
+            # try/except below.
+            results = await asyncio.gather(
+                *[_UNLOAD_FNS[g]() for g in competing],
+                return_exceptions=True,
+            )
 
-        for g, result in zip(competing, results):
-            if isinstance(result, Exception):
-                logger.warning(
-                    "[resource_manager] unload error group=%s: %s", g, result
-                )
+            for g, result in zip(competing, results):
+                if isinstance(result, Exception):
+                    logger.warning(
+                        "[resource_manager] unload error group=%s: %s", g, result
+                    )
 
-        logger.warning("[resource_manager] done for model=%s", model)
-        return data
+            logger.warning("[resource_manager] done for model=%s", model)
+            return data
+        except BaseException:
+            # BaseException — covers asyncio.CancelledError on Python 3.8+
+            # where it is no longer an Exception subclass. Release the
+            # semaphore via the contextvar path so a cancelled-mid-pre-call
+            # request doesn't deadlock the hardware group permanently.
+            self._release_sem({})
+            raise
 
     async def async_log_success_event(
         self, kwargs, response_obj, start_time, end_time

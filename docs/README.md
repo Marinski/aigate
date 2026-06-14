@@ -18,13 +18,11 @@ The big ones at a glance:
 - [audiolla / audiolla-cuda](services/audiolla.md) — audio production REST + MCP (stem sep / mastering / MIR / MIDI / text-to-audio)
 - [sd.cpp](services/sdcpp.md) — local image generation
 - [LiteLLM](services/litellm.md) — OpenAI-compatible gateway
+- [piston](services/piston.md) — sandboxed multi-language code execution (50+ langs), nsjail isolation, REST + MCP tool any function-calling LLM can call
 
 ## By topic
 
 - [Providers + model aliases](providers.md) — every LLM / embedding / ASR / TTS model registered through LiteLLM, with its slug and provider.
 - [Testing](testing.md) — what the test suite covers per service + how to run it.
-- [Resource management](services/resource-management.md) — cross-cutting LiteLLM resource_manager: single-job-per-hardware semaphores, competing-group eviction, who unloads whom.
+- [Resource management](resource-management.md) — cross-cutting LiteLLM resource_manager: single-job-per-hardware semaphores, competing-group eviction, who unloads whom.
 
-## Old paths
-
-`docs/services-reference.md` and `docs/usage.md` were monolithic dumps that grew unwieldy. Both have been retired in favour of the per-service files under [`services/`](services/). Existing inbound links still work — those two files now redirect to the service index.

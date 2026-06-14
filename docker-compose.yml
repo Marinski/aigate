@@ -142,6 +142,8 @@ services:
       timeout: 5s
       retries: 5
       start_period: 30s
+    security_opt:
+      - no-new-privileges:true
     networks:
       - aigate-internal
       - aigate-public
@@ -173,6 +175,8 @@ services:
       timeout: 5s
       retries: 5
       start_period: 30s
+    security_opt:
+      - no-new-privileges:true
     networks:
       - aigate-internal
       - aigate-public
@@ -602,6 +606,8 @@ services:
       - OLLAMA_NUM_GPU=0
     volumes:
       - ${DATA_DIR_OLLAMA:-${DATA_DIR:-.data}/ollama}:/root/.ollama
+    security_opt:
+      - no-new-privileges:true
     networks:
       - aigate-internal
       - aigate-public
@@ -692,6 +698,8 @@ services:
             - driver: nvidia
               count: all
               capabilities: [gpu]
+    security_opt:
+      - no-new-privileges:true
     networks:
       - aigate-internal
       - aigate-public
@@ -1097,6 +1105,76 @@ services:
     networks:
       - aigate-public
 
+  # ── piston — multi-language sandboxed code execution ──────────────────────
+  # Upstream: github.com/engineer-man/piston. The image is built locally
+  # from ./piston/Dockerfile, which pre-bakes every language in
+  # PISTON_LANGUAGES at BUILD time (the build context has internet; runtime
+  # doesn't). Adding a new language = bump PISTON_LANGUAGES, `make build`,
+  # redeploy. In exchange the runtime container lives on aigate-internal
+  # ONLY, with no outbound network — a popped neighbour container in
+  # aigate-public can no longer reach piston:2000 directly.
+  #
+  # privileged: true is still required for piston's nsjail-based sandboxing
+  # at RUNTIME — it needs to set up user namespaces + chroots per
+  # execution. The actual code isolation lives inside the nsjail subprocess
+  # (own user / mount / pid / net namespaces, seccomp filter, cgroup
+  # limits), not in the privileged container itself. The privileged
+  # container is what nsjail needs to BUILD that sandbox.
+  #
+  # MCP-wise: the `mcp/` aggregator service registers an `execute_code` tool
+  # that proxies through http://piston:2000/api/v2/execute (in-network, no
+  # nginx hop), so any function-calling LLM in LiteLLM's catalog can call
+  # it. External callers can also hit /piston/api/v2/* via nginx (bearer-
+  # auth gated against AIGATE_TOKEN).
+
+  piston:
+    profiles: ["piston"]
+    # Custom pre-baked image: upstream piston + every language in
+    # PISTON_LANGUAGES installed at BUILD time so the runtime container can
+    # live on aigate-internal with no outbound network access. Adding a new
+    # language = bump PISTON_LANGUAGES, rebuild via `make build` (or
+    # `docker compose --profile piston build piston`), redeploy.
+    build:
+      context: ./piston
+      dockerfile: Dockerfile
+      args:
+        PISTON_LANGUAGES: ${PISTON_LANGUAGES:-python=3.12.0,node=20.11.1}
+    restart: unless-stopped
+    privileged: true
+    mem_limit: ${PISTON_MEM_LIMIT:-4g}
+    memswap_limit: ${PISTON_MEMSWAP_LIMIT:-8g}
+    cpus: ${PISTON_CPUS:-2.0}
+    environment:
+      # Piston's own config knobs. See https://piston.readthedocs.io/en/
+      # latest/configuration/ for the full list.
+      PISTON_BIND_ADDRESS: "0.0.0.0:2000"
+      PISTON_RUN_TIMEOUT: ${PISTON_RUN_TIMEOUT:-30000}        # ms per execution
+      PISTON_COMPILE_TIMEOUT: ${PISTON_COMPILE_TIMEOUT:-30000} # ms per compile
+      PISTON_OUTPUT_MAX_SIZE: ${PISTON_OUTPUT_MAX_SIZE:-1024}  # KB
+      PISTON_MAX_PROCESS_COUNT: ${PISTON_MAX_PROCESS_COUNT:-64}
+      PISTON_MAX_OPEN_FILES: ${PISTON_MAX_OPEN_FILES:-2048}
+      PISTON_MAX_FILE_SIZE: ${PISTON_MAX_FILE_SIZE:-10000000}  # bytes
+      PISTON_DISABLE_NETWORKING: ${PISTON_DISABLE_NETWORKING:-true}
+      PISTON_REPO_URL: ${PISTON_REPO_URL:-https://github.com/engineer-man/piston/releases/download/pkgs/index}
+    # No volume mount on /piston — every language we serve is pre-baked into
+    # the image by piston/Dockerfile. A host-side bind-mount here would
+    # shadow the image content, leaving the runtime container with whatever
+    # packages were installed under a previous version of this service.
+    # Runtime job scratch (under /piston/jobs/) is ephemeral by design.
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:2000/api/v2/runtimes',timeout=5).status==200 else 1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    networks:
+      # aigate-internal only — every language is already pre-baked into
+      # the image at build time, so the runtime container has no need to
+      # reach GitHub releases. Removing aigate-public shrinks the attack
+      # surface so a popped neighbour container can't reach piston:2000
+      # directly to spawn arbitrary code execution.
+      - aigate-internal
+
   # ── MCP tools (image generation + TTS, extensible) ─────────────────────────
 
   mcp:
@@ -1114,6 +1192,14 @@ services:
       PUBLIC_BASE_URL: ${MCP_PUBLIC_BASE_URL:-https://aigate.51k.eu}
       MCP_TOOLS_AUTH_TOKEN: ${MCP_TOOLS_AUTH_TOKEN:-${AIGATE_TOKEN:-lulz-4-security}}
       SEARXNG_URL: ${SEARXNG_URL:-http://searxng:8080}
+      # in-network piston URL (no nginx route, no bearer auth needed —
+      # mcp is already on aigate-internal). Defaults to http://piston:
+      # 2000. Tool registration is gated on this being non-empty; if
+      # PISTON=0 the URL is reachable-only when piston is up — tool
+      # calls will return clean error JSON otherwise. Set explicitly
+      # to empty in .env to fully disable execute_code regardless of
+      # piston's state.
+      PISTON_URL: ${MCP_PISTON_URL:-http://piston:2000}
     depends_on:
       litellm:
         condition: service_healthy
@@ -1439,6 +1525,38 @@ configs:
               proxy_cache off;
           }
 
+          # piston — sandboxed multi-language code execution. Upstream has NO
+          # built-in auth, so we gate the route at the nginx layer with a
+          # bearer-token check against AIGATE_TOKEN (same token clients use
+          # for /v1/* via LiteLLM). Same shape as the LiteLLM Bearer check —
+          # the token literal is substituted into the nginx config at boot
+          # time by docker-compose's config-rendering pass. The rendered
+          # config lives in docker config-store memory, not on disk outside
+          # the docker daemon.
+          location /piston/ {
+              limit_req zone=piston burst=${RATELIMIT_PISTON_BURST:-10} nodelay;
+              if ($$http_authorization != "Bearer ${AIGATE_TOKEN:-lulz-4-security}") {
+                  return 401 '{"error":"missing or invalid Authorization: Bearer <token>"}';
+              }
+              set $$upstream_piston http://piston:2000;
+              rewrite ^/piston/(.*) /$$1 break;
+              proxy_pass $$upstream_piston;
+              proxy_set_header Host $$http_host;
+              proxy_set_header X-Real-IP $$remote_addr;
+              proxy_set_header X-Forwarded-For $$proxy_add_x_forwarded_for;
+              proxy_set_header X-Forwarded-Proto $$scheme;
+              # Strip the client Authorization header before proxying to
+              # piston. The nginx-level check above already gated entry; the
+              # upstream piston process has no auth of its own and never
+              # needs to see AIGATE_TOKEN. Avoids the token landing in any
+              # future piston request log.
+              proxy_set_header Authorization "";
+              proxy_read_timeout ${TIMEOUT_PISTON:-2m};
+              proxy_send_timeout ${TIMEOUT_PISTON:-2m};
+              proxy_buffering off;
+              proxy_cache off;
+          }
+
           # predictalot — time-series forecasting (direct route, not via LiteLLM)
           location /predictalot/ {
               limit_req zone=predictalot burst=${RATELIMIT_PREDICTALOT_BURST:-20} nodelay;
@@ -1719,6 +1837,7 @@ configs:
       limit_req_zone $$binary_remote_addr zone=audiolla:10m rate=${RATELIMIT_AUDIOLLA:-30r/m};
       limit_req_zone $$binary_remote_addr zone=audiolla_cuda:10m rate=${RATELIMIT_AUDIOLLA_CUDA:-30r/m};
       limit_req_zone $$binary_remote_addr zone=mailbox:10m rate=${RATELIMIT_MAILBOX:-60r/m};
+      limit_req_zone $$binary_remote_addr zone=piston:10m rate=${RATELIMIT_PISTON:-30r/m};
 
   proxq_config:
     content: |

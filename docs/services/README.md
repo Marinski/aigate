@@ -1,6 +1,6 @@
 # Services
 
-One file per service. Each file contains the deep reference (endpoints, models, config, internals) **and** the curl recipes / usage examples for that service — no more flipping between `services-reference.md` and `usage.md`.
+One file per service. Each file contains the deep reference (endpoints, models, config, internals) **and** the curl recipes / usage examples for that service.
 
 ## Local inference
 
@@ -12,6 +12,12 @@ One file per service. Each file contains the deep reference (endpoints, models, 
 | [talkies / talkies-cuda](talkies.md) | `TALKIES=1` / `TALKIES_CUDA=1` | Unified ASR + TTS — Whisper / Canary / Parakeet / Nemotron + Kokoro + Qwen3-TTS. |
 | [audiolla / audiolla-cuda](audiolla.md) | `AUDIOLLA=1` / `AUDIOLLA_CUDA=1` | Audio production — stem separation, restoration, mastering, MIR, MIDI, text-to-audio generation. |
 | [predictalot / predictalot-cuda](predictalot.md) | `PREDICTALOT=1` / `PREDICTALOT_CUDA=1` | Foundation time-series forecasting. |
+
+## Agent execution tooling
+
+| Service | Profile flag(s) | What it does |
+|---|---|---|
+| [piston](piston.md) | `PISTON=1` | Sandboxed multi-language code execution (50+ langs via [engineer-man/piston](https://github.com/engineer-man/piston) + nsjail isolation). REST + MCP tool. |
 
 ## Cloud LLM gateway
 
@@ -51,6 +57,3 @@ For the full LLM/embeddings/STT/TTS model alias table see [`docs/providers.md`](
 | [tailscale](tailscale.md) | `TAILSCALE=1` | Tailnet-only exposure via `tailscale serve`. |
 | [cloudflared](cloudflared.md) | `CLOUDFLARED=1` | Cloudflare Tunnel (quick or named). |
 
-## Cross-cutting docs
-
-- [Resource management](resource-management.md) — how the LiteLLM resource_manager coordinates the single-hardware-job-at-a-time + competing-group eviction across every service that loads weights into VRAM or RAM.

@@ -43,7 +43,7 @@ curl -X POST http://localhost:4000/mcp/ \
 
 You can also hit the SearXNG UI directly at `http://localhost:4000/searxng/` for ad-hoc queries (protected by nginx admin auth).
 
-→ [SearXNG service reference](services-reference.md#searxng-optional-searxng1) · [MCP tool schema](mcp-tools.md#mcp_tools-auto-enabled-with-imagetts-search-providers)
+→ [SearXNG configuration](#configuration) · [MCP tool schema](../mcp-tools.md#mcp_tools-auto-enabled-with-imagetts-search-providers)
 
 ---
 

@@ -78,7 +78,7 @@ curl -X DELETE http://localhost:4000/mailbox/mailboxes/work/messages/<uid> \
 
 The MCP catalog is flat regardless of how many accounts you've configured — per-account tools take a `mailbox` parameter (name or address) instead of namespacing.
 
-→ [mailbox service reference](services-reference.md#mailbox-optional-mailbox1) · [mailbox MCP tools](mcp-tools.md#mailbox--imapsmtp-gateway-mailbox1)
+→ [mailbox configuration](#configuration) · [mailbox MCP tools](../mcp-tools.md#mailbox--imapsmtp-gateway-mailbox1)
 
 ---
 

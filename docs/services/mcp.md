@@ -14,7 +14,7 @@ Auto-enabled when any image or TTS provider is active (HuggingFace, OpenAI, Spea
 
 Both tools return structured JSON with persistent HybridS3 URLs — no base64 blobs sent to the LLM.
 
-See [mcp-tools.md](mcp-tools.md#mcp_tools--2-tools-auto-enabled-with-imagetts-providers) for full parameter reference.
+See [mcp-tools.md](../mcp-tools.md#mcp_tools--2-tools-auto-enabled-with-imagetts-providers) for full parameter reference.
 
 ### Environment variables
 

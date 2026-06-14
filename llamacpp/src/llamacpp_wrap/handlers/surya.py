@@ -65,6 +65,7 @@ import httpx
 from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 
+from .._net import allow_private_fetch, is_blocked_host
 from .base import Forward
 
 
@@ -301,6 +302,22 @@ class SuryaHandler:
                     detail=f"PDF data URL base64 decode failed: {exc}",
                 ) from exc
         if url.startswith("http://") or url.startswith("https://"):
+            # Same SSRF guard as the wrapper's general image_url fetch
+            # path. We sit on aigate-internal and can resolve internal
+            # neighbours by hostname; any caller authenticated to
+            # LiteLLM should NOT be able to use the OCR PDF fetch to
+            # probe postgres / redis / litellm / etc.
+            if not allow_private_fetch():
+                from urllib.parse import urlparse
+                host = urlparse(url).hostname or ""
+                if not host:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"image_url {url!r} has no host",
+                    )
+                blocked, reason = is_blocked_host(host)
+                if blocked:
+                    raise HTTPException(status_code=400, detail=reason)
             try:
                 r = await client.get(
                     url,

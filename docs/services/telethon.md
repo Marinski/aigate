@@ -69,4 +69,4 @@ curl "http://localhost:4000/telethon/api/messages?chat=me&limit=5" \
 
 Chat references accept `@username`, phone numbers, `t.me/...` links, or numeric IDs as strings. The same surface is exposed as MCP tools (`telethon-send_message`, `telethon-get_dialogs`, etc.) so any function-calling model can operate Telegram on your behalf.
 
-→ [Telethon service reference](services-reference.md#telethon-plus-optional-telethon1) · [Telethon MCP tools](mcp-tools.md#telethon-plus--telegram-client-telethon1)
+→ [Telethon configuration](#configuration) · [Telethon MCP tools](../mcp-tools.md#telethon-plus--telegram-client-telethon1)
