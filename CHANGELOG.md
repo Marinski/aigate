@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented here.
 
+## [v3.11.1] — 2026-06-14
+
+README-only follow-up — three stale spots missed in the v3.11.0 piston ship.
+
+- **Tools and capabilities bullet list** — piston was missing from the bullets at the top of the README. Added a "Sandboxed code execution" bullet between the agentic-coding-agents entry and the object-storage entry, calling out the nsjail isolation, the Python+Node default, the `PISTON_LANGUAGES` knob for adding more, and the REST + MCP `execute_code` surfaces.
+- **Services table piston row** — still mentioned a `piston-pull` sidecar that was dropped in v3.11.0 (pre-bake at build time replaced it) and listed `Python / Node / Bash / Deno / Go / Rust / TypeScript` as the default install when the actual default is just Python + Node. Row rewritten: correct default lang set, pre-bake-at-build-time rationale + the `aigate-internal`-only network model, the build-then-redeploy flow for adding languages, the upstream pkgs staleness note, and the Authorization-header-strip detail.
+- **Security section** — top-level Security subsection at line 40 still carried the prior "All containers run with `no-new-privileges`" claim that the lower Network-isolation section had already qualified. Rewrote to match: application containers carry the flag; piston (privileged for nsjail) and tailscale (NET_ADMIN for tun) are the two genuine carve-outs.
+
 ## [v3.11.0] — 2026-06-14
 
 New service `piston` (sandboxed multi-language code execution) + a whole-package security/correctness pass triggered by a brutal review across every line of code, every doc, every config. 11 concrete defects found and fixed; 7 broken doc links repaired; supply-chain audit completed.
