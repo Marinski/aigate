@@ -8,4 +8,4 @@ predictalot_cuda:
   # LiteLLM sends Host: predictalot-cuda:8080 → 421 Misdirected Request.
   static_headers:
     Host: "127.0.0.1:8080"
-  description: "Time-series forecasting (NVIDIA GPU variant of predictalot). Same model + tool set as the CPU `predictalot` MCP — see that fragment's description for the full per-tool list. Use this when you want a forced-GPU path; use `predictalot` when CPU is enough. Both share ${DATA_DIR_PREDICTALOT}/models so cached HF snapshots are reused across variants. Tools namespaced as `predictalot_cuda-<tool>` in the aggregated /mcp/."
+  description: "Time-series forecasting (NVIDIA GPU variant of predictalot). Same model + tool set as the CPU `predictalot` MCP — see that fragment's description for the full per-tool list. Use this when you want a forced-GPU path; use `predictalot` when CPU is enough. Both share ${DATA_DIR_PREDICTALOT}/models so cached HF snapshots are reused across variants. Tools namespaced as `predictalot_cuda-<tool>` in the aggregated /mcp/. Same v1.0.0 caveat as the CPU fragment: the new /v1/tabular/* family is REST-only (not yet MCP-wrapped upstream)."

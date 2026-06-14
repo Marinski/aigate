@@ -86,3 +86,8 @@ Thumbs.db
 ANUSTIMES.md
 BRUTAL_REVIEW.md
 COUNTER_REVIEW.md
+
+# raw voice samples — local-only workspace dir users drop reference WAVs
+# into for talkies custom-voice cloning; the processed (slugified subdir +
+# transcript .txt) form lives under ${DATA_DIR_TALKIES}/custom-voices/
+.custom_voices/

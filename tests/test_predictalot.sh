@@ -2,12 +2,16 @@
 
 # ── predictalot: gated on PREDICTALOT=1 / PREDICTALOT_CUDA=1 ──────────────
 #
-# v0.2.x ships a type-routed API. There is no `/v1/models` or `/v1/forecast`
-# anymore — each forecast type has its own subtree:
-#   /v1/{univariate,multivariate,covariates/past,covariates/future,covariates,samples}/{forecast,forecast/ensemble,models}
-# All five models implement `univariate`, so that's the smoke-test surface.
-# v0.2.1 closes the auth gap on /v1/<type>/models (open in v0.2.0); only
-# /healthz is open now.
+# v1.0.0 stabilises the API. FM forecast endpoints live under the
+# `/v1/timeseries/` prefix (moved from `/v1/<type>/` in v0.2.x — BREAKING;
+# old paths now return 404):
+#   /v1/timeseries/{univariate,multivariate,covariates/past,covariates/future,
+#                   covariates,samples}/{forecast,forecast/ensemble,models}
+# All five FM models implement `univariate`, so that's the smoke-test surface.
+# A sibling `/v1/tabular/*` family also ships in v1.0.0 (9 supervised backends
+# + 3 meta-learners) but is NOT MCP-wrapped upstream, so we cover it only via
+# direct REST below.
+# Auth gate from v0.2.1 still applies (only /healthz is open without bearer).
 #
 # Two variants live side-by-side on distinct nginx routes:
 #   /predictalot/        → CPU container (PREDICTALOT=1)
@@ -26,26 +30,26 @@ _predictalot_cuda_enabled() { [ "${PREDICTALOT_CUDA:-0}" = "1" ]; }
 _predictalot_test_models_list() {
     local prefix="$1" tag="$2"
     local out
-    out=$(curl -sf "$BASE_URL${prefix}/v1/univariate/models" \
+    out=$(curl -sf "$BASE_URL${prefix}/v1/timeseries/univariate/models" \
         -H "Authorization: Bearer $PREDICTALOT_AUTH_TOKEN" 2>/dev/null)
-    assert_contains "$out" "chronos-2" "${tag} ${prefix}/v1/univariate/models has chronos-2" || return 1
-    assert_contains "$out" "timesfm-2.5" "${tag} /v1/univariate/models has timesfm-2.5" || return 1
-    assert_contains "$out" "moirai-2" "${tag} /v1/univariate/models has moirai-2" || return 1
-    assert_contains "$out" "toto-1" "${tag} /v1/univariate/models has toto-1" || return 1
-    assert_contains "$out" "sundial-base-128m" "${tag} /v1/univariate/models has sundial-base-128m" || return 1
+    assert_contains "$out" "chronos-2" "${tag} ${prefix}/v1/timeseries/univariate/models has chronos-2" || return 1
+    assert_contains "$out" "timesfm-2.5" "${tag} /v1/timeseries/univariate/models has timesfm-2.5" || return 1
+    assert_contains "$out" "moirai-2" "${tag} /v1/timeseries/univariate/models has moirai-2" || return 1
+    assert_contains "$out" "toto-1" "${tag} /v1/timeseries/univariate/models has toto-1" || return 1
+    assert_contains "$out" "sundial-base-128m" "${tag} /v1/timeseries/univariate/models has sundial-base-128m" || return 1
     echo "OK: ${tag} models_list"
 }
 
 _predictalot_test_multivariate_models_list() {
     local prefix="$1" tag="$2"
     local out
-    out=$(curl -sf "$BASE_URL${prefix}/v1/multivariate/models" \
+    out=$(curl -sf "$BASE_URL${prefix}/v1/timeseries/multivariate/models" \
         -H "Authorization: Bearer $PREDICTALOT_AUTH_TOKEN" 2>/dev/null)
     assert_contains "$out" "chronos-2" "${tag} multivariate has chronos-2" || return 1
     assert_contains "$out" "moirai-2" "${tag} multivariate has moirai-2" || return 1
     assert_contains "$out" "toto-1" "${tag} multivariate has toto-1" || return 1
     if echo "$out" | grep -q "timesfm-2.5"; then
-        echo "  FAIL: ${tag} timesfm-2.5 should not appear in /v1/multivariate/models"
+        echo "  FAIL: ${tag} timesfm-2.5 should not appear in /v1/timeseries/multivariate/models"
         return 1
     fi
     echo "OK: ${tag} multivariate_models_list"
@@ -55,7 +59,7 @@ _predictalot_test_requires_auth() {
     local prefix="$1" tag="$2"
     local code
     code=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
-        "$BASE_URL${prefix}/v1/univariate/forecast" \
+        "$BASE_URL${prefix}/v1/timeseries/univariate/forecast" \
         -H "Content-Type: application/json" \
         -d '{"model":"chronos-2","context":[[1,2,3,4,5]],"config":{"horizon":1}}')
     if [ "$code" != "401" ] && [ "$code" != "403" ]; then
@@ -68,7 +72,7 @@ _predictalot_test_requires_auth() {
 _predictalot_test_forecast_chronos() {
     local prefix="$1" tag="$2"
     local out
-    out=$(curl -sf -X POST "$BASE_URL${prefix}/v1/univariate/forecast" \
+    out=$(curl -sf -X POST "$BASE_URL${prefix}/v1/timeseries/univariate/forecast" \
         -H "Authorization: Bearer $PREDICTALOT_AUTH_TOKEN" \
         -H "Content-Type: application/json" \
         --max-time 300 \
@@ -88,7 +92,7 @@ _predictalot_test_forecast_chronos() {
 _predictalot_test_univariate_ensemble() {
     local prefix="$1" tag="$2"
     local out
-    out=$(curl -sf -X POST "$BASE_URL${prefix}/v1/univariate/forecast/ensemble" \
+    out=$(curl -sf -X POST "$BASE_URL${prefix}/v1/timeseries/univariate/forecast/ensemble" \
         -H "Authorization: Bearer $PREDICTALOT_AUTH_TOKEN" \
         -H "Content-Type: application/json" \
         --max-time 300 \
@@ -107,7 +111,7 @@ _predictalot_test_unknown_model() {
     local prefix="$1" tag="$2"
     local code
     code=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
-        "$BASE_URL${prefix}/v1/univariate/forecast" \
+        "$BASE_URL${prefix}/v1/timeseries/univariate/forecast" \
         -H "Authorization: Bearer $PREDICTALOT_AUTH_TOKEN" \
         -H "Content-Type: application/json" \
         -d '{"model":"not-a-real-model","context":[[1,2,3]],"config":{"horizon":1}}')
@@ -119,12 +123,12 @@ _predictalot_test_non_member_rejected() {
     local prefix="$1" tag="$2"
     local code
     code=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
-        "$BASE_URL${prefix}/v1/multivariate/forecast" \
+        "$BASE_URL${prefix}/v1/timeseries/multivariate/forecast" \
         -H "Authorization: Bearer $PREDICTALOT_AUTH_TOKEN" \
         -H "Content-Type: application/json" \
         -d '{"model":"timesfm-2.5","context":[[[1,2,3],[4,5,6]]],"config":{"horizon":1}}')
     if [ "$code" = "200" ]; then
-        echo "  FAIL: ${tag} timesfm-2.5 should not be accepted on /v1/multivariate/forecast (got 200)"
+        echo "  FAIL: ${tag} timesfm-2.5 should not be accepted on /v1/timeseries/multivariate/forecast (got 200)"
         return 1
     fi
     echo "OK: ${tag} non_member_rejected ($code)"

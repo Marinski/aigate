@@ -2,6 +2,105 @@
 
 All notable changes to this project are documented here.
 
+## [v3.12.0] — 2026-06-14
+
+**Bump predictalot to v1.0.1 — adds tabular ML, renames FM URL prefix (breaking for direct REST callers).**
+
+Upstream `psyb0t/predictalot` cut its v1.0.0 API-stabilization release followed by a v1.0.1 docs-only patch the same day. aigate ships v1.0.1 directly: it (a) introduces a second model family — supervised tabular ML — alongside the existing foundation time-series stack, (b) layers per-call escape hatches on the FM side, and (c) reorganises the FM URL prefix under `/v1/timeseries/`. v1.0.1 itself is docs-only over v1.0.0 (no source changes, no behavior change — upstream restructured the README into `docs/{timeseries,tabular,mcp,configuration,architecture,accuracy,errors}.md`); we point our links at the new tree. We bump the image, rewrite tests + docs for the new prefix, and propagate the surface description through the MCP fragments.
+
+### Breaking — direct REST callers only
+
+- Every FM forecast / ensemble / models endpoint moves from `/v1/<type>/…` to `/v1/timeseries/<type>/…` upstream. **No redirect compatibility layer ships** in v1.0.0 — old paths return 404. Migration mapping:
+  - `/predictalot/v1/univariate/forecast` → `/predictalot/v1/timeseries/univariate/forecast`
+  - `/predictalot/v1/multivariate/forecast` → `/predictalot/v1/timeseries/multivariate/forecast`
+  - `/predictalot/v1/covariates/past/forecast` → `/predictalot/v1/timeseries/covariates/past/forecast`
+  - `/predictalot/v1/covariates/future/forecast` → `/predictalot/v1/timeseries/covariates/future/forecast`
+  - `/predictalot/v1/covariates/forecast` → `/predictalot/v1/timeseries/covariates/forecast`
+  - `/predictalot/v1/samples/forecast` → `/predictalot/v1/timeseries/samples/forecast`
+  - `…/forecast/ensemble` and `…/models` move identically.
+- **MCP callers are unaffected** — tool names (`predictalot-forecast_<type>_<model>`, `predictalot-list_<type>_models`, etc.) did not change. Only direct REST callers need to rewrite URLs.
+
+### Added — predictalot v1.0.0 tabular surface
+
+- **`/v1/tabular/*`** — supervised ML over caller-engineered features (engineered indicators, signals, embeddings — predictalot itself does not synthesise features; it fits backends to whatever the caller hands in).
+- 9 backends: `lightgbm`, `xgboost`, `hist-gbt`, `random-forest`, `logistic`, `mlp`, `svm-rbf`, `knn`, `naive-bayes`.
+- 3 modes each: `direction` (classification), `value` (regression), `quantile`.
+- Train + persist + forecast surface — `POST /v1/tabular/train`, `POST /v1/tabular/forecast`, `POST /v1/tabular/forecast/ensemble`, `GET /v1/tabular/backends`, `GET /v1/tabular/models`, `DELETE /v1/tabular/models/{id}`.
+- 3 meta-learners — `POST /v1/tabular/train/calibrated` (Platt / isotonic on a held-out time-ordered tail), `POST /v1/tabular/train/stacking` (K-fold OOF + meta-learner), `POST /v1/tabular/train/diversified` (greedy low-correlation candidate selection). Each with a matching `/forecast/<meta>` endpoint.
+- Tier-2 cross-backend config: `categoricalFeatures`, `monotonicConstraints`, `classWeight`, `sampleWeight`, `earlyStoppingRounds` / `validationFraction`. Each backend uses what applies and ignores the rest.
+- Lazy-loaded — `predictalot.models` imports without pulling in the heavy ML wheels.
+- **REST-only in v1.0.0** — upstream has not (yet) registered tabular endpoints as MCP tools. Callers reach the tabular family via direct REST through `/predictalot/v1/tabular/*` only. The 26-tool FM MCP surface is unchanged.
+
+### Added — predictalot v1.0.0 FM escape hatches
+
+- `ForecastConfig.extra` / `SamplesForecastConfig.extra` — per-call dict forwarded to the backend `predict_*` adapter for backend-specific kwargs that don't fit a cross-cutting schema. Backends drop keys they don't understand (forward-compat).
+- Ensemble `memberOverrides: {slug → partial-config}` on every FM ensemble request. Each member's override shadows the matching key in the global `config` for that member only — different ensemble members can run with different `contextLength`, `extra`, etc. in a single call. Unknown slugs are silently ignored.
+
+### Files
+
+- `docker-compose.yml` — `psyb0t/predictalot:v0.2.1` → `:v1.0.1`, `psyb0t/predictalot:v0.2.1-cuda` → `:v1.0.1-cuda`.
+- `tests/test_predictalot.sh` — all REST paths rewritten from `/v1/<type>/` to `/v1/timeseries/<type>/` (14 occurrences). Header comment block updated to document the new prefix + the existence of the tabular family.
+- `README.md` — services-table predictalot row rewritten to call out v1.0.0 + tabular ML. Tools-and-capabilities bullet rewritten too. Curl example bumped to the new prefix.
+- `docs/services/predictalot.md` — full surface description rewritten to cover both families + the v0.2.x → v1.0.0 breaking-change call-out. Curl example bumped.
+- `docs/testing.md` — predictalot test description updated for the new prefix.
+- `litellm/config/mcp/predictalot.yaml` + `predictalot-cuda.yaml` — descriptions appended with a note that the v1.0.0 tabular family is REST-only (not yet MCP-wrapped upstream) so an LLM consulting the MCP catalog knows to use REST for tabular work.
+
+### Live-verified
+
+Both `psyb0t/predictalot:v1.0.1` and `:v1.0.1-cuda` pulled (each ~identical bytes to its `v1.0.0` predecessor — image rebuilt for the tag, no source changes). Containers restarted, `tests/test_predictalot.sh` re-run against the new prefix — 16/16 green (CPU + CUDA). Live REST sanity: old `/v1/univariate/models` → 404, new `/v1/timeseries/univariate/models` → 200 with 5 FM models, `/v1/tabular/backends` → 200 with 9 supervised backends listing `direction`/`value`/`quantile` supportedModes.
+
+---
+
+### Also in this release — merged talkies voices endpoint + proxq filter tightening
+
+Unrelated to predictalot, also bundled into v3.12.0:
+
+#### New endpoint — `GET /v1/audio/voices`
+
+LiteLLM's OpenAI-standard surface only covers `/v1/audio/{transcriptions,speech}`; the upstream talkies API exposes a (non-standard) `GET /v1/audio/voices` voice-catalog listing that LiteLLM does NOT route — so before this release the catalog was only reachable inside the talkies container. Now mcp aggregates CPU + CUDA upstreams, annotates each voice with the matching LiteLLM model alias(es), and surfaces the merged list at the public `/v1/audio/voices` route.
+
+- **`mcp/server.py`** — new `@mcp.custom_route("/v1/audio/voices")` handler. Probes `TALKIES_URL` and `TALKIES_CUDA_URL` (whichever are set — gracefully tolerates either being unconfigured or unreachable; errors are surfaced under an optional top-level `errors` field on the response without failing the call). Builds an `upstream_model → [LiteLLM aliases]` map via `GET /v1/model/info` so each voice ships with the model alias slug a caller plugs into the `model` field on `/v1/audio/speech`. Sort order: kokoro family first, then qwen3-tts, then any others — predictable for clients.
+- **`docker-compose.yml`** — `mcp` service gains `TALKIES_URL: ${MCP_TALKIES_URL:-http://talkies:8000}` and `TALKIES_CUDA_URL: ${MCP_TALKIES_CUDA_URL:-http://talkies-cuda:8000}`. Nginx gains a `location = /v1/audio/voices` block proxying to `mcp:8000` **before** the LiteLLM catch-all, so the route reaches mcp directly (with the existing api-zone rate limit, same shape as other passthroughs).
+
+Response shape:
+
+```json
+{
+  "voices": [
+    {
+      "voice": "af_alloy",
+      "upstream_model": "kokoro-82m",
+      "model_aliases": ["local-talkies-cuda-kokoro-tts", "local-talkies-kokoro-tts"],
+      "default": false
+    },
+    {
+      "voice": "kevin-the-fuckin-dorkster/kevin-the-fuckin-dorkster",
+      "upstream_model": "qwen3-tts-0.6b",
+      "model_aliases": ["local-talkies-cuda-qwen3-tts"],
+      "default": false
+    }
+  ]
+}
+```
+
+A voice that exists on both CPU and CUDA (kokoro family) appears once with **both** aliases in `model_aliases` so the client can pick CPU vs CUDA freely. Voices that only exist on one side (qwen3-tts family, CUDA-only) only carry the relevant CUDA aliases. Default with both talkies CPU + CUDA enabled: **130 voices**.
+
+#### proxq pathFilter tightened — listing endpoints no longer queued
+
+`proxq`'s `pathFilter.patterns` whitelist had `^/v1/audio` as a catch-all — which correctly queued `/v1/audio/{speech,transcriptions,translations}` (inference, slow, queue-friendly) but **also** queued the new `/v1/audio/voices` listing (which is a cheap GET that should be instant). A caller hitting `/q/v1/audio/voices` would receive a `jobId` and have to poll. Narrowed the whitelist to the three explicit inference paths so `/q/v1/audio/voices` falls through to direct pass-through (eventual 404 from LiteLLM — caller should use `/v1/audio/voices` directly):
+
+```
+- "^/v1/audio/speech"
+- "^/v1/audio/transcriptions"
+- "^/v1/audio/translations"
+```
+
+#### Verified live
+
+- `GET /v1/audio/voices` (no `/q/` prefix) — **200** with 130-voice merged payload.
+- `POST /q/v1/audio/speech` — **200** with `jobId` (still queued correctly).
+- `GET /q/v1/audio/voices` — pass-through (no longer queued).
+
 ## [v3.11.2] — 2026-06-14
 
 README routing-diagram follow-up to v3.11.1 — three more gaps in the ASCII routing diagram that v3.11.1 didn't catch.

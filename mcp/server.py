@@ -34,6 +34,15 @@ PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "")
 # caller can't reach this tool to drive piston.
 PISTON_URL = os.environ.get("PISTON_URL", "")
 
+# talkies — CPU + CUDA. Used for the merged /v1/audio/voices endpoint
+# below: the upstream talkies exposes a voice-listing API that LiteLLM
+# does not route (it's not OpenAI-standard). We aggregate whatever's
+# enabled and translate each voice's upstream model name into the
+# matching LiteLLM alias(es) so a caller can go straight from voice
+# pick to /v1/audio/speech without a second lookup.
+TALKIES_URL = os.environ.get("TALKIES_URL", "")
+TALKIES_CUDA_URL = os.environ.get("TALKIES_CUDA_URL", "")
+
 HF_INFERENCE_BASE = "https://router.huggingface.co/hf-inference/models"
 
 MIME_TO_EXT = {
@@ -599,6 +608,114 @@ if PISTON_URL:
 
 else:
     log("PISTON_URL not set — execute_code tool disabled")
+
+
+# ── Custom HTTP route: GET /v1/audio/voices (merged talkies CPU+CUDA) ────────
+
+from starlette.requests import Request as StarletteRequest  # noqa: E402
+from starlette.responses import JSONResponse  # noqa: E402
+
+@mcp.custom_route("/v1/audio/voices", methods=["GET"])
+async def list_voices(_request: StarletteRequest) -> JSONResponse:
+    """Aggregate /v1/audio/voices from talkies CPU + CUDA (whichever is
+    configured) and pair each voice with the LiteLLM alias(es) that
+    route to its upstream model. Output shape:
+
+      {
+        "voices": [
+          {
+            "voice": "<voice-name>",
+            "upstream_model": "<talkies-side model name>",
+            "model_aliases": ["<litellm-alias>", ...],
+            "default": <bool>
+          },
+          ...
+        ]
+      }
+
+    `model_aliases` is sorted; empty if the upstream model has no
+    matching LiteLLM alias (shouldn't happen for the shipped config but
+    is safe to ignore client-side).
+    """
+    # 1) Pull voices from each enabled upstream. Skip the ones the
+    #    operator hasn't configured. Tolerate per-upstream errors so a
+    #    flaky CUDA box doesn't kill the merged list when CPU is fine.
+    voices_by_upstream: dict[str, list[dict]] = {}
+    errors: list[str] = []
+    async with httpx.AsyncClient(timeout=10) as client:
+        for label, base in (("cpu", TALKIES_URL), ("cuda", TALKIES_CUDA_URL)):
+            if not base:
+                continue
+            try:
+                r = await client.get(f"{base}/v1/audio/voices")
+                r.raise_for_status()
+                for v in r.json().get("voices", []):
+                    name = v.get("voice")
+                    model = v.get("model")
+                    if not name or not model:
+                        continue
+                    voices_by_upstream.setdefault(model, []).append({
+                        "voice": name,
+                        "default": bool(v.get("default", False)),
+                    })
+            except Exception as exc:
+                errors.append(f"talkies-{label}: {exc}")
+
+        # 2) Build upstream_model -> [LiteLLM alias] map via /v1/model/info.
+        #    Each litellm_params.model is shaped like "openai/qwen3-tts-0.6b";
+        #    strip the leading provider tag to recover the upstream name.
+        alias_map: dict[str, list[str]] = {}
+        try:
+            info = await client.get(
+                f"{LITELLM_URL}/v1/model/info",
+                headers={"Authorization": f"Bearer {LITELLM_KEY}"},
+            )
+            info.raise_for_status()
+            for m in info.json().get("data", []):
+                params = m.get("litellm_params") or {}
+                upstream = (params.get("model") or "").split("/", 1)[-1]
+                alias = m.get("model_name")
+                if upstream and alias:
+                    alias_map.setdefault(upstream, []).append(alias)
+        except Exception as exc:
+            errors.append(f"litellm model/info: {exc}")
+
+    # 3) Merge + dedupe per (voice, upstream_model). A voice can appear in
+    #    BOTH CPU and CUDA — collapse to one entry; the alias list will
+    #    naturally contain both CPU and CUDA aliases.
+    seen: set[tuple[str, str]] = set()
+    out: list[dict] = []
+    for upstream, items in voices_by_upstream.items():
+        aliases = sorted(set(alias_map.get(upstream, [])))
+        for it in items:
+            key = (it["voice"], upstream)
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append({
+                "voice": it["voice"],
+                "upstream_model": upstream,
+                "model_aliases": aliases,
+                "default": it["default"],
+            })
+
+    # Sort: kokoro voices first (the always-on CPU+CUDA family), then
+    # qwen3-tts family, then anything else. Within a family, by voice
+    # name. Stable + predictable for clients.
+    def _sortkey(v: dict) -> tuple:
+        m = v["upstream_model"]
+        family = (
+            0 if m.startswith("kokoro") else
+            1 if m.startswith("qwen3-tts") else
+            2
+        )
+        return (family, m, v["voice"])
+    out.sort(key=_sortkey)
+
+    payload: dict = {"voices": out}
+    if errors:
+        payload["errors"] = errors
+    return JSONResponse(payload)
 
 
 # ── Main ────────────────────────────────────────────────────────

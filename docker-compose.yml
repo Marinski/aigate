@@ -191,7 +191,7 @@ services:
   # the first's HF snapshots.
   predictalot:
     profiles: ["predictalot"]
-    image: psyb0t/predictalot:v0.2.1
+    image: psyb0t/predictalot:v1.0.1
     restart: unless-stopped
     mem_limit: ${PREDICTALOT_MEM_LIMIT:-6g}
     memswap_limit: ${PREDICTALOT_MEMSWAP_LIMIT:-12g}
@@ -223,7 +223,7 @@ services:
 
   predictalot-cuda:
     profiles: ["predictalot-cuda"]
-    image: psyb0t/predictalot:v0.2.1-cuda
+    image: psyb0t/predictalot:v1.0.1-cuda
     restart: unless-stopped
     mem_limit: ${PREDICTALOT_CUDA_MEM_LIMIT:-12g}
     memswap_limit: ${PREDICTALOT_CUDA_MEMSWAP_LIMIT:-24g}
@@ -1200,6 +1200,13 @@ services:
       # to empty in .env to fully disable execute_code regardless of
       # piston's state.
       PISTON_URL: ${MCP_PISTON_URL:-http://piston:2000}
+      # talkies CPU + CUDA base URLs. mcp's GET /v1/audio/voices route
+      # aggregates voices from whichever is reachable; if both are unset
+      # the merged-voices endpoint returns an empty list. In-network
+      # hostnames — same threat model as PISTON_URL above (mcp is on
+      # aigate-internal, talkies-* containers are on aigate-internal).
+      TALKIES_URL: ${MCP_TALKIES_URL:-http://talkies:8000}
+      TALKIES_CUDA_URL: ${MCP_TALKIES_CUDA_URL:-http://talkies-cuda:8000}
     depends_on:
       litellm:
         condition: service_healthy
@@ -1741,6 +1748,25 @@ configs:
               return 404;
           }
 
+          # talkies merged voices — upstream /v1/audio/voices is not
+          # OpenAI-standard, so LiteLLM doesn't route it. mcp aggregates
+          # CPU + CUDA upstreams and annotates each voice with the
+          # matching LiteLLM model alias(es). Same Bearer auth as the
+          # LiteLLM catch-all below (mcp container does its own check
+          # via MCP_TOOLS_AUTH_TOKEN). Uses the api rate-limit zone.
+          location = /v1/audio/voices {
+              limit_req zone=api burst=${RATELIMIT_API_BURST:-30} nodelay;
+              proxy_pass http://mcp:8000;
+              proxy_set_header Host $$http_host;
+              proxy_set_header X-Real-IP $$remote_addr;
+              proxy_set_header X-Forwarded-For $$proxy_add_x_forwarded_for;
+              proxy_set_header X-Forwarded-Proto $$scheme;
+              proxy_read_timeout 30s;
+              proxy_send_timeout 30s;
+              proxy_buffering off;
+              proxy_cache off;
+          }
+
           # everything else — LiteLLM API
           location / {
               limit_req zone=api burst=${RATELIMIT_API_BURST:-30} nodelay;
@@ -1871,7 +1897,13 @@ configs:
               - "^/v1/completions"
               - "^/v1/embeddings"
               - "^/v1/images"
-              - "^/v1/audio"
+              # Specific audio-inference endpoints only — DO NOT queue
+              # listing endpoints like /v1/audio/voices (instant via
+              # nginx → mcp; queueing would block the caller waiting on
+              # a job ID for what is a cheap GET).
+              - "^/v1/audio/speech"
+              - "^/v1/audio/transcriptions"
+              - "^/v1/audio/translations"
               - "^/v1/responses"
               - "^/chat/completions"
               - "^/completions"
