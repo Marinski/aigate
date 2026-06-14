@@ -2,6 +2,16 @@
 
 All notable changes to this project are documented here.
 
+## [v3.11.2] — 2026-06-14
+
+README routing-diagram follow-up to v3.11.1 — three more gaps in the ASCII routing diagram that v3.11.1 didn't catch.
+
+- **Nginx routes block** — no `/piston/` line. Added between `/mailbox/` and `/`.
+- **MCP servers block** — `mcp_tools` was listed as exposing `generate_image + generate_tts + search_web` only. The `execute_code` tool (introduced in v3.11.0, gated on `PISTON_URL` being set) is also in `mcp_tools`; appended it + extended the auto-enable trigger to mention piston.
+- **LiteLLM providers block** — the llamacpp wrappers (`LLAMACPP=1` / `LLAMACPP_CUDA=1`) — which serve GGUF + vision-VLM weights, notably Surya OCR 2 — were missing. Added two rows between vLLM CUDA and claudebox.
+
+No code, config, or behavior changes.
+
 ## [v3.11.1] — 2026-06-14
 
 README-only follow-up — three stale spots missed in the v3.11.0 piston ship.
