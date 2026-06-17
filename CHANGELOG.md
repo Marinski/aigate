@@ -2,6 +2,28 @@
 
 All notable changes to this project are documented here.
 
+## [v3.12.1] — 2026-06-17
+
+**Bump audiolla v1.0.5 → v1.0.6 — two upstream bug fixes.**
+
+Upstream `psyb0t/audiolla` cut v1.0.5 (no API changes — pytest test infra refresh, engine logging coverage across 25/25 engines, latent bug fixes for UVR `_STEM_RE` regex, UVR phantom-output filter, DeepFilterNet PATH requirement, `Dockerfile.cuda` missing `COPY presets`, pyannote test `num_speakers == 0` accept) followed by v1.0.6 (two bug fixes surfaced by downstream consumers).
+
+### Upstream v1.0.6 fixes
+
+- **`/v1/audio/info`** — was reporting `"ffprobe failed: unknown error"` because the underlying `ffprobe` call used `-v quiet` which muted real stderr too. Now surfaces the actual ffprobe stderr so a caller passing a bad file gets a useful error.
+- **`/v1/audio/trim`** — `end_sec` is now optional; omitting it trims to source end. Wire-shape relaxation — old callers still work (passing `end_sec` continues to work the same way); new callers can omit.
+
+No code, config, or behavior changes on the aigate side beyond the image tag.
+
+### Files
+
+- `docker-compose.yml` — `psyb0t/audiolla:v1.0.5` → `:v1.0.6`, `psyb0t/audiolla:v1.0.5-cuda` → `:v1.0.6-cuda`.
+
+### Live-verified
+
+- Both `psyb0t/audiolla:v1.0.6` and `:v1.0.6-cuda` pulled, containers recreated, both healthy.
+- `tests/test_audiolla.sh` — 14/14 green (covers `/v1/audio/info` which received the ffprobe-error fix; doesn't exercise `/v1/audio/trim`, so no test rewrite needed for the relaxed wire shape).
+
 ## [v3.12.0] — 2026-06-14
 
 **Bump predictalot to v1.0.1 — adds tabular ML, renames FM URL prefix (breaking for direct REST callers).**
