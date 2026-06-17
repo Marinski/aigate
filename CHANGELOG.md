@@ -2,6 +2,35 @@
 
 All notable changes to this project are documented here.
 
+## [v3.12.2] — 2026-06-17
+
+**Bump audiolla v1.0.6 → v1.0.7 — field aliases + master mode auto-detect + preset/pipeline JSON migration + global JSON 500 envelope.**
+
+Upstream tagged the release as "UX + bug-fix. No API contract removed." Every change is additive (new accepted field name, optional field made optional) or a strict-superset relaxation (handler accepts more shapes than before). Most of it is invisible to aigate as a proxy — we surface whatever shape clients send.
+
+### Upstream v1.0.7 changes
+
+- **Field-name compatibility aliases.** `/v1/audio/fade` accepts `fade_in_sec` / `fade_out_sec` (consistent with the rest of the API's `_sec` suffix on numeric fields — `_sec` wins when both supplied). `/v1/audio/eq` band dict accepts `frequency` (alias of `freq`) and `q` (alias of `width_hz`). `/v1/audio/similar` accepts `file_path_b` / `file_url_b` (the "compare two files" reading) as aliases for `reference_file_path` / `reference_file_url`.
+- **`/v1/audio/master` mode auto-detect.** `mode` is now optional — inferred from request fields: `reference_path` / `reference_url` set → `mode=reference`; `preset` set → `mode=chain`; neither → 400 with a helpful detail. Schema docstring also clarifies the master endpoint's `preset` (transparent / loud) is a different namespace from the workflow presets listed at `GET /v1/presets`.
+- **`POST /v1/presets/{name}` + `POST /v1/pipeline` JSON-body migration.** Both endpoints were still using `Form()` / `File()` — missed by the v1.0.0 spec-first refactor. Now use JSON body with new `PresetRunRequest` + `PipelineRunRequest` schemas; pipeline steps are now a typed `list[{op, params?}]` array instead of a JSON-string blob. **Strict shape change for callers using the old Form/File contract on these two endpoints** — but everyone else's `POST /v1/audio/*` endpoints have been JSON since v1.0.0, so this is converging on the documented spec.
+- **Global JSON 500 envelope.** Previously, uncaught non-HTTPException errors returned FastAPI's default plain-text `Internal Server Error` body, which broke downstream clients that parse `response.json()` on every error. A new `@app.exception_handler(Exception)` logs the failure via `audiolla.request` (with traceback) and returns `500 {"detail": "<ExceptionClass>: <message>"}`.
+- **Remix linear-gain shorthand.** `/v1/audio/remix` accepts `{stem: 0..1}` (linear gain shorthand) as well as the canonical `{stem: {gain_db, mute}}`. Additive.
+- **UVR phantom-output diagnostic.** WARNING log now lists actual tmpdir contents alongside the library's claimed output filenames — easier root-causing when UVR claims an output file that was never written.
+
+### aigate-side
+
+`tests/test_audiolla.sh` doesn't exercise `/v1/audio/{fade,eq,similar,master,remix}`, `/v1/presets/*`, or `/v1/pipeline`, so the test suite stays as-is. No code, config, or doc changes on the aigate side beyond the image tag.
+
+### Files
+
+- `docker-compose.yml` — `psyb0t/audiolla:v1.0.6` → `:v1.0.7`, `psyb0t/audiolla:v1.0.6-cuda` → `:v1.0.7-cuda`.
+
+### Live-verified
+
+- `psyb0t/audiolla:v1.0.7` (sha256:3ea5b7e7…) + `:v1.0.7-cuda` (sha256:dce75632…) pulled.
+- aigate-audiolla-1 + aigate-audiolla-cuda-1 recreated, both healthy.
+- `tests/test_audiolla.sh` — 14/14 green (CPU + CUDA).
+
 ## [v3.12.1] — 2026-06-17
 
 **Bump audiolla v1.0.5 → v1.0.6 — two upstream bug fixes.**
