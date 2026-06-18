@@ -2,6 +2,43 @@
 
 All notable changes to this project are documented here.
 
+## [v3.12.4] — 2026-06-18
+
+**Bump pibox v0.8.0 → v0.9.0 — tracks aicodebox v0.8.1 base; schema validation actually validates on `/openai/v1/chat/completions` + per-attempt usage breakdown.**
+
+Upstream pibox shipped v0.9.0 the same day, bumping its aicodebox base from v0.7.0 to v0.8.1. Two meaningful surface changes propagate through `/pibox-zai/` (and through the LiteLLM `pibox-zai-*` aliases that route to it).
+
+### What v0.9.0 brings
+
+- **`/pibox-zai/openai/v1/chat/completions` schema validation actually validates now.** v0.7.0 plumbed the `x-aicodebox-json-schema` header into RunSpec but the route never read `result.parsed`, so schema-set callers got 200 OK on malformed JSON. v0.9.0 fixes that:
+  - Success → `message.content` is canonical re-serialized JSON (no fences).
+  - Schema exhaustion → 422.
+  - Agent crash → 500.
+  - `stream:true + schema header` → 400 (the two are incompatible).
+- **Per-attempt breakdown on `/pibox-zai/run`** (`.attempts`) and on the OAI envelope (`.aicodebox_attempts` vendor extension). The top-level `.usage` is now summed across attempts so callers billing on total tokens see every retry counted. Useful for `caller-can-bill-per-attempt` and for debugging which retry failed which way.
+- **Base image pinned by digest.** pibox v0.9.0's Dockerfile + Makefile pin `psyb0t/aicodebox:v0.8.1@sha256:3a234d49d348b3182897c781be6b364e6b5d17784c4b70ac12df132e066d6dac` to guard against tag-rebuild drift (`:latest` and `:v0.8.1` currently resolve to different image IDs on Docker Hub).
+
+### Breaking — `/pibox-zai/openai/v1/models` response shape
+
+**Breaking.** Upstream aicodebox v0.8.x renamed the `owned_by` field on `/openai/v1/models` entries from the adapter name (`"pi"`) to `"aicodebox"`. Old callers that filtered models by `owned_by == "pi"` (the old aicodebox idiom) will see zero matches against pibox v0.9.0. Migration: filter by `owned_by == "aicodebox"`, or by model `id` directly (e.g. `glm-4.7`).
+
+Routes through the LiteLLM-aggregated `/v1/models` listing are unaffected — that endpoint surfaces the per-model `pibox-zai-glm-*` aliases regardless of what `owned_by` upstream stamps each entry with.
+
+### aigate-side
+
+- `tests/test_pibox.sh:test_pibox_zai_openai_models` — assertion rewritten to check `"owned_by":"aicodebox"` + presence of `"glm-4.7"` instead of the old `"pi"` adapter substring. Header comment updated to document the aicodebox v0.8.x rename so future-readers don't trip on it.
+- No code, config, or other doc changes — pibox is a passthrough proxy.
+
+### Files
+
+- `docker-compose.yml` — `psyb0t/pibox:v0.8.0` → `:v0.9.0`.
+- `tests/test_pibox.sh` — `test_pibox_zai_openai_models` updated for the `owned_by` rename.
+
+### Live-verified
+
+- `psyb0t/pibox:v0.9.0` pulled from Docker Hub. `aigate-pibox-zai-1` recreated, healthy.
+- `tests/test_pibox.sh` — 7/7 green.
+
 ## [v3.12.3] — 2026-06-18
 
 **Bump audiolla v1.0.7 → v1.0.10 — bundles three upstream patches (v1.0.8 / v1.0.9 / v1.0.10). All bug fixes; no API removals.**

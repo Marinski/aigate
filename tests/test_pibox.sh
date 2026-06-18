@@ -87,9 +87,12 @@ test_pibox_zai_file_ops() {
 }
 
 # ── pibox-zai OpenAI-compatible models endpoint ───────────────────────────
-# aicodebox /openai/v1/models returns the adapter name ("pi"), not the
-# configured model list. The configured models surface through LiteLLM's
-# top-level /v1/models — checked separately via test_pibox_zai_via_litellm_models.
+# aicodebox /openai/v1/models lists the PIBOX_AVAILABLE_MODELS entries with
+# owned_by="aicodebox". (Pre-aicodebox-v0.8.x, owned_by used to be the
+# adapter name "pi"; aicodebox v0.8.0+ — surfaced by pibox v0.9.0 — now
+# tags every entry as "aicodebox" instead.) The configured models surface
+# through LiteLLM's top-level /v1/models too — checked separately via
+# test_pibox_zai_via_litellm_models.
 
 test_pibox_zai_openai_models() {
     _pibox_zai_enabled || { echo "  SKIP: PIBOX_ZAI=0"; return 0; }
@@ -97,7 +100,8 @@ test_pibox_zai_openai_models() {
     out=$(curl -sf "$BASE_URL/pibox-zai/openai/v1/models" \
         -H "Authorization: Bearer $PIBOX_ZAI_API_TOKEN" 2>/dev/null)
     assert_contains "$out" '"object":"list"' "pibox-zai openai models returns list" || return 1
-    assert_contains "$out" '"pi"' "pibox-zai openai models has pi adapter" || return 1
+    assert_contains "$out" '"owned_by":"aicodebox"' "pibox-zai openai models entries tagged owned_by=aicodebox" || return 1
+    assert_contains "$out" '"glm-4.7"' "pibox-zai openai models lists glm-4.7" || return 1
     echo "OK: pibox_zai_openai_models"
 }
 
