@@ -2,6 +2,64 @@
 
 All notable changes to this project are documented here.
 
+## [v3.12.3] — 2026-06-18
+
+**Bump audiolla v1.0.7 → v1.0.10 — bundles three upstream patches (v1.0.8 / v1.0.9 / v1.0.10). All bug fixes; no API removals.**
+
+> Heads-up: as of this release tag, `psyb0t/audiolla:v1.0.10` and `:v1.0.10-cuda` may not yet be published on Docker Hub. Operators pulling fresh from main + running `docker compose up` will need to wait until upstream publishes — or use locally-built images.
+
+### v1.0.8 — UVR phantom-output root cause + remix stems arg
+
+`/v1/audio/restore/uvr-{dereverb,deecho,denoise}` + `/v1/audio/noise-reduce/uvr-denoise` were returning `"model produced no output files"` regardless of input — a 3-layer config bug, not a model issue:
+
+1. `audio-separator` snapshots `output_dir` into its per-architecture `model_instance` config at `load_model()` time. Mutating `sep.output_dir = tmpdir` AFTER load only updates the outer wrapper. The inner MDXC / VR / Demucs separator kept its original `output_dir` (= `os.getcwd()` = `/app/`, root-owned inside the container). pydub's ffmpeg export then failed with EACCES; audio-separator caught the exception and reported the would-have-been path in `output_files` as if successful; audiolla's "filter to files that actually exist on disk" check then dropped everything → "no output files".
+2. `output_single_stem=self._primary_stem` in the `Separator(...)` call was filtering against the MODEL's `primary_stem_name` (e.g. "Vocals"), not against engines.json's `primary_stem` (e.g. "No Reverb"). Names never matched → library wrote zero stems.
+3. Model's near-silent stem dropper + test helper accepting "no output files" as graceful skip masked layers 1 and 2 on synthetic fixtures.
+
+Fix: drop `output_single_stem=` from the `Separator(...)` call (audiolla picks the right stem post-hoc via `_find_stem_file` substring match); propagate `sep.model_instance.output_dir = tmpdir` alongside `sep.output_dir = tmpdir` before each `separate()` call. Both `_separate_sync` and `_restore_sync_with_sep` paths updated. Plus a heavy-reverb test fixture + strict UVR output assertions.
+
+Also: `/v1/audio/remix` was throwing `TypeError` (missing `stems` arg to `separate()`) — masked pre-v1.0.7 by FastAPI's plain-text 500. Fixed.
+
+### v1.0.9 — remix single-stem-solo
+
+Surfaced by v1.0.8 finally letting separation reach the mix step. Request that triggered:
+
+```
+POST /v1/audio/remix
+{"engine":"htdemucs","stem_mix":{"vocals":1.0,"drums":0.0,"bass":0.0,"other":0.0}}
+```
+
+Solos vocals — drops every other stem. After gain filtering only ONE mix input survived. Downstream `mix_audio()` rejected with `"mix_audio requires at least 2 inputs"`.
+
+Fix:
+- New `audio.apply_gain_db(raw, filename, gain_db, output_format)` helper — single-stream ffmpeg `volume=` pass. Mirrors `mix_audio`'s output_format handling + codec selection.
+- `server.py` remix handler short-circuits to `apply_gain_db` when `len(mix_inputs) == 1`. Two-stem-and-up path unchanged.
+
+Regression test `test_remix_single_stem_solo` exercises end-to-end (htdemucs separation + single-stem bounce) and asserts response is JSON, detail does NOT contain `"requires at least 2"`.
+
+### v1.0.10 — visualize/volume + metadata persist + catalog routes
+
+Three concrete bugs from real user reports + a catalog/route consistency check:
+
+- **`/v1/audio/visualize/video/volume`** — ffmpeg's `showvolume` filter rejects `s=WxH`; needs `w=W:h=H` as separate options. Added per-filter `size_arg_style` (`"s"` / `"wh"` / None) to the `_VISUALIZE_FILTERS` table and branched the filter-spec assembly. Regression: `test_visualize_volume_mp4`.
+- **`/v1/audio/metadata` write mode** — now persists tagged audio to disk when `output_path` / `output_url` is supplied. `AudioMetadataRequest` gains the `BaseAudioOutputRequest` mixin; handler delegates to `write_output()` for the standard `{path|url, size, tags, persisted: true}` descriptor. Additive — without an output target the response is the unchanged shape (tags at top level) but flagged `persisted=false`. Regressions: `test_metadata_write_with_output_path_persists`, `test_metadata_write_without_output_marks_persisted_false`.
+- **`/v1/catalog` paths corrected** — `/v1/audio/batch` → `/v1/batch` and `/v1/audio/diarize` → `/v1/audio/diarize/{engine}` (catalog was reporting wrong paths). New consistency test `test_catalog_paths_match_actual_routes` walks every `(method, path)` in the catalog and asserts each resolves against the FastAPI OpenAPI spec — guards against future drift.
+
+Out-of-scope note: occasional plain-text 5xx reports are NOT audiolla's — v1.0.7's `@app.exception_handler(Exception)` wraps every uncaught exception in `{"detail": ...}`. Plain-text 5xx that still escapes comes from the layer above (nginx 502/504, container kill mid-request, kernel OOM).
+
+### aigate-side
+
+`tests/test_audiolla.sh` doesn't exercise `/v1/audio/restore/*`, `/v1/audio/noise-reduce/*`, `/v1/audio/remix`, `/v1/audio/visualize/*`, `/v1/audio/metadata`, or `/v1/catalog`, so the test suite stays as-is. No code, config, or doc changes on the aigate side beyond the image tag.
+
+### Files
+
+- `docker-compose.yml` — `psyb0t/audiolla:v1.0.7` → `:v1.0.10`, `psyb0t/audiolla:v1.0.7-cuda` → `:v1.0.10-cuda`.
+
+### Live-verified
+
+- `psyb0t/audiolla:v1.0.10` + `:v1.0.10-cuda` present locally; both containers recreated, both healthy.
+- `tests/test_audiolla.sh` — 14/14 green (CPU + CUDA).
+
 ## [v3.12.2] — 2026-06-17
 
 **Bump audiolla v1.0.6 → v1.0.7 — field aliases + master mode auto-detect + preset/pipeline JSON migration + global JSON 500 envelope.**
