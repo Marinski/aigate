@@ -21,14 +21,19 @@ test_pibox_zai_reachable() {
 
 test_pibox_zai_chat() {
     _pibox_zai_enabled || { echo "  SKIP: PIBOX_ZAI=0"; return 0; }
+    # Use glm-4.7 (not glm-4.5-air). z.ai's glm-4.5-air returns empty
+    # content roughly 80% of the time on this exact echo prompt — a
+    # weakness of the smallest model, not a pibox bug. Surfaced when
+    # pibox v0.10.0 added parse_output text_len=0 logging on the
+    # PiAdapter layer. glm-4.7 follows the echo instruction reliably.
     local out
     out=$(post "$BASE_URL/chat/completions" \
-        '{"model":"pibox-zai-glm-4.5-air","messages":[{"role":"system","content":"You are a test echo bot. Reply with exactly what is asked, no commentary."},{"role":"user","content":"Reply with exactly: PIBOXPONG7742"}]}')
+        '{"model":"pibox-zai-glm-4.7","messages":[{"role":"system","content":"You are a test echo bot. Reply with exactly what is asked, no commentary."},{"role":"user","content":"Reply with exactly: PIBOXPONG7742"}]}')
     if echo "$out" | grep -qi "authentication_error\|Failed to authenticate\|invalid api key"; then
         echo "  FAIL: pibox-zai z.ai token rejected — check PIBOX_ZAI_AUTH_TOKEN in .env"
         return 1
     fi
-    assert_contains "$out" "PIBOXPONG7742" "pibox-zai-glm-4.5-air responds" || return 1
+    assert_contains "$out" "PIBOXPONG7742" "pibox-zai-glm-4.7 responds" || return 1
     assert_contains "$out" "choices" "response has choices" || return 1
     echo "OK: pibox_zai_chat"
 }

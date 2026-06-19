@@ -2,6 +2,39 @@
 
 All notable changes to this project are documented here.
 
+## [v3.12.5] — 2026-06-19
+
+**Bump pibox v0.9.0 → v0.10.0 — tracks aicodebox v0.8.3 base; PiAdapter logging brought to reconstruction-grade; single-source versioning fix; test flake fix.**
+
+Upstream pibox v0.10.0 pulls in two aicodebox patches — v0.8.2 (reconstruction-grade logging on the schema-mode path) and v0.8.3 (single-source versioning via `pyproject.toml` + `importlib.metadata`, eliminating the long-running `__version__ = "0.1.0"` drift bug) — and brings the PiAdapter layer's own logging from zero to spec. Wire-level contract unchanged.
+
+### What v0.10.0 brings
+
+- **PiAdapter logging.** Previously zero logging calls. Now: decode errors, provider errors, schema bolt-on, build_argv decisions, and a `parse_output` summary line per call (text_len, session_id, lines, decode_errors, usage_keys, provider_error). Security-aware — never logs tokens / secrets / full prompts / full schemas; only schema keys + truncated samples. Mirrors the level/format discipline from `~/.claude/rules/06-logging.md`.
+- **aicodebox v0.8.2 schema-mode logging.** `parse_json_response`, `run_with_json_retry`, `oai.chat_completions`, header parse helpers — all logged at reconstruction-grade. Schema retries and failure modes are now observable end-to-end.
+- **Single-source versioning (aicodebox v0.8.3).** `pyproject.toml` is THE version. `__init__.py` reads via `importlib.metadata`. Makefile derives the docker tag from pyproject and tags both `:v0.10.0` AND `:latest` per build. Eliminates the version-drift bug that had `__version__` stuck at `"0.1.0"` across every release since v0.1.0 itself.
+- **Base image bump:** `psyb0t/aicodebox:v0.8.1` → `:v0.8.3` (tag pin — upstream notes digest pending registry push).
+- **PiAdapter functional contract unchanged.** No wire-level changes to `/run` / OAI / MCP / files-API. Upstream 46/46 tests green.
+
+### aigate-side
+
+- `docker-compose.yml` — `psyb0t/pibox:v0.9.0` → `:v0.10.0`.
+- `tests/test_pibox.sh:test_pibox_zai_chat` — swapped test model from `pibox-zai-glm-4.5-air` to `pibox-zai-glm-4.7`. Reason: z.ai's `glm-4.5-air` returns empty `content` ~80% of the time on the echo prompt (`"Reply with exactly: PIBOXPONG7742"`) — a model-side weakness in z.ai's smallest model, NOT a pibox bug. Surfaced because v0.10.0's new PiAdapter logging added `parse_output text_len=0` lines that made the failure mode visible (pre-v0.10.0, the empty completions went through silently and we just got lucky on test runs). `glm-4.7` follows the echo instruction reliably (5/5 in measurement). Comment added to the test documenting the rationale.
+
+### Files
+
+- `docker-compose.yml` — image tag bump.
+- `tests/test_pibox.sh` — test model swap + rationale comment.
+
+### Live-verified
+
+- `psyb0t/pibox:v0.10.0` present locally; `aigate-pibox-zai-1` recreated, healthy.
+- `tests/test_pibox.sh` — 7/7 green in isolation. Sequential reruns occasionally trip on z.ai upstream rate-limit / latency flakes (unrelated to pibox or aigate).
+
+### Caveats
+
+- `psyb0t/pibox:v0.10.0` and the underlying `psyb0t/aicodebox:v0.8.3` may not be published on Docker Hub at the moment this tag is cut. Operators pulling fresh and running `docker compose up` will hit a 404 until upstream publishes — or need to use locally-built images.
+
 ## [v3.12.4] — 2026-06-18
 
 **Bump pibox v0.8.0 → v0.9.0 — tracks aicodebox v0.8.1 base; schema validation actually validates on `/openai/v1/chat/completions` + per-attempt usage breakdown.**
