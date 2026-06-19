@@ -2,6 +2,47 @@
 
 All notable changes to this project are documented here.
 
+## [v3.12.6] — 2026-06-19
+
+**Bump pibox v0.10.0 → v0.11.0 — tracks aicodebox v0.9.0; new OpenAI-standard `response_format` body field on `/openai/v1/chat/completions`.**
+
+Upstream pibox v0.11.0 pulls in aicodebox v0.9.0, which wires the OpenAI-standard `response_format` body field into `/openai/v1/chat/completions`. Stock OAI SDKs (LangChain, openai-python, LlamaIndex) can now drive schema enforcement without the proprietary `x-aicodebox-json-schema` header. PiAdapter zero code changes — v0.9.0 was route-only.
+
+### New surface
+
+`/pibox-zai/openai/v1/chat/completions` and the LiteLLM-aggregated `pibox-zai-*` model aliases now accept `response_format` in the request body:
+
+| `response_format.type` | Behavior |
+|---|---|
+| `text` | No schema (default, unchanged) |
+| `json_object` | Permissive `{"type":"object"}` constraint — forces parseable JSON without restricting shape |
+| `json_schema` | Uses `response_format.json_schema.schema` (OpenAI structured-outputs shape) as the schema |
+
+Failure semantics + canonical re-serialized JSON content shape identical to the existing header path (`x-aicodebox-json-schema`). Body wins on conflict; the proprietary header stays supported as fallback.
+
+### Breaking
+
+**Breaking.** `/pibox-zai/openai/v1/chat/completions` with `response_format={"type":"json_object"}` now returns **200 with schema-validated JSON content** — was **400** in v0.10.0 and earlier (the rejection was the v0.10.0 happy-path test surface). Callers using the 400 as a control-flow signal must migrate — either accept the 200 + JSON content (the intended new behavior) or omit `response_format` entirely.
+
+Routes through the LiteLLM-aggregated `/v1/models` listing are unaffected — model aliases stay the same.
+
+### aigate-side
+
+`tests/test_pibox.sh` doesn't exercise `response_format` on `/openai/v1/chat/completions`, so the test suite stays as-is. No code, config, or doc changes — pibox is a passthrough proxy and aigate documents talkies' `response_format` (ASR/TTS) but not pibox's chat-completions `response_format` (so nothing to sync).
+
+### Files
+
+- `docker-compose.yml` — `psyb0t/pibox:v0.10.0` → `:v0.11.0`.
+
+### Live-verified
+
+- `psyb0t/pibox:v0.11.0` present locally; `aigate-pibox-zai-1` recreated, healthy.
+- `tests/test_pibox.sh` — 7/7 green.
+
+### Caveats
+
+- `psyb0t/pibox:v0.11.0` and the underlying `psyb0t/aicodebox:v0.9.0` may not be published on Docker Hub at this tag's cut moment. Fresh `docker compose up` from a clean clone will hit 404 until upstream publishes — or operators need locally-built images.
+
 ## [v3.12.5] — 2026-06-19
 
 **Bump pibox v0.9.0 → v0.10.0 — tracks aicodebox v0.8.3 base; PiAdapter logging brought to reconstruction-grade; single-source versioning fix; test flake fix.**
