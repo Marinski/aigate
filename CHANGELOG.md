@@ -2,6 +2,56 @@
 
 All notable changes to this project are documented here.
 
+## [v3.13.0] — 2026-06-21
+
+**Fix sd.cpp image-gen flakiness — resource_manager now blocking-pre-loads sd.cpp models inside the pre-call hook so LiteLLM never dispatches an image-gen call against a cold or mid-loading backend.**
+
+### The bug
+
+`/v1/images/generations` against `local-sdcpp-{cuda,cpu}-*` routes was intermittently returning HTTP 200 with empty `data` instead of an image. Symptom: ~10s response time per call (suggesting the backend was trying), no error in the response body.
+
+Root cause was a three-stage amplification:
+
+1. **sd.cpp wrapper** uses `TryLockModel` on every `POST /v1/images/generations`. If the model isn't already loaded, the first call holds the lock for ~5-20 s while loading (varies by model — sdxl-turbo ~55 s cold; sd-turbo ~24 s; sdxl-lightning ~55 s). Any concurrent call within that window returns 503 `another load or generation in progress`.
+2. **LiteLLM router** responds to a 503 by retrying internally (`num_retries: 3`) and walking the per-model fallback chain (every sd.cpp model has 4-5 fallback targets — `sdxl-turbo → sdxl-lightning → sd-turbo → hf-flux-schnell → openai-dall-e-3`). Every retry hits the same lock. One external call → ~15-30 backend hits, all 503.
+3. **LiteLLM image-gen fallback exhaustion** returns HTTP 200 with empty `data` instead of propagating the 503. (Chat-completion fallback exhaustion correctly returns 5xx; image-gen masquerades as success — upstream LiteLLM bug.)
+
+Verified live: 4/5 sequential calls across mixed sd.cpp models returned empty data before the fix.
+
+### The fix
+
+`litellm/callbacks/resource_manager.py` — added `_preload_sdcpp()` helper + `_sdcpp_key_for()` model-alias translator, wired into `async_pre_call_hook` immediately after the competing-group unload step. When the requested model belongs to `cuda-img` / `cpu-img`:
+
+1. The hardware semaphore is already held (existing behavior — serializes against other CUDA/CPU work).
+2. Competing groups have been unloaded (existing behavior).
+3. **NEW:** `POST <sdcpp-base>/sdcpp/v1/load?model=<key>` is issued and blocked-waited on. This is sd.cpp's explicit blocking-load endpoint — it returns 200 once the model is in memory and idle, or 200 `already_loaded` if it was already there.
+4. The pre-call hook returns to LiteLLM. LiteLLM dispatches the actual `POST /v1/images/generations`. Backend is fully warm. Attempt 1 succeeds. No 503 storm, no fallback amplification, no empty-data response.
+
+`_preload_sdcpp` failures are LOGGED (not raised) so a missing model / corrupt weights / GPU OOM surfaces as a real backend error from the dispatched call instead of indefinitely blocking the request.
+
+### Behavior changes
+
+- `local-sdcpp-{cuda,cpu}-*` requests now reliably return image data even on cold start / cross-model swap. Cold-load latency is now charged to the pre-call hook rather than to LiteLLM router's internal retry loop, so the elapsed wall-clock per external call is essentially unchanged.
+- No-op (~ms) when the requested model is already loaded — `/sdcpp/v1/load` short-circuits with `already_loaded: true`.
+- Other model groups (chat / embed / talkies / vllm / llamacpp / predictalot) — UNCHANGED. The pre-warm step only fires for `cuda-img` / `cpu-img`.
+- New URL constants `_SDCPP_CUDA_URL` / `_SDCPP_CPU_URL` introduced for the unload + load endpoints (existing unload calls re-routed through the constants — no functional change).
+
+### Verified live
+
+- 5/5 sequential cold/warm/swap calls across `sd-turbo` / `sdxl-turbo` / `sdxl-lightning` return valid b64-encoded PNG data.
+- pre-call log line `[resource_manager] sdcpp preloaded model=<key>` confirms the new step fires every cuda-img / cpu-img request.
+
+### Known residual
+
+- High-concurrency parallel calls (5+ simultaneous external requests against different sd.cpp models) can still flake — LiteLLM router's internal parallel retry path partially bypasses the proxy pre_call hook and can race the model-swap window. Beyond the realistic user workload (1-2 req/min for ad-hoc image gen) so deferred.
+- Cosmetic: `_release_sem` fires 30+ times per call from multiple LiteLLM log events (latent — semaphore is idempotently released after first call; no functional impact).
+
+### Files
+
+- `litellm/callbacks/resource_manager.py` — new `_preload_sdcpp()` + `_sdcpp_key_for()` helpers; wired into `async_pre_call_hook` after the competing-group unload step.
+- `docs/resource-management.md` — new "sd.cpp pre-load (image generation only)" section + step (4) added to the per-request flow.
+- `README.md` — Resource Management section gains a "sd.cpp pre-load" paragraph between competing-group unload and auto-load on demand.
+
 ## [v3.12.6] — 2026-06-19
 
 **Bump pibox v0.10.0 → v0.11.0 — tracks aicodebox v0.9.0; new OpenAI-standard `response_format` body field on `/openai/v1/chat/completions`.**

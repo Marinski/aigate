@@ -33,8 +33,17 @@ When a request arrives for a local model:
 1. The resource manager identifies which group it belongs to (e.g. `local-sdcpp-cuda-flux-schnell` → `cuda-img`)
 2. It acquires the hardware semaphore (waits if another job is running)
 3. It unloads all competing groups on the same hardware (e.g. unloads `cuda-llm`, `cuda-tts`, `cuda-stt`)
-4. The request proceeds
-5. On completion (success or failure), the semaphore is released
+4. **For sd.cpp (`cuda-img` / `cpu-img`) only:** it explicitly POSTs `/sdcpp/v1/load?model=<key>` and blocks until the backend has the requested model loaded — see "sd.cpp pre-load" below for why.
+5. The request proceeds
+6. On completion (success or failure), the semaphore is released
+
+### sd.cpp pre-load (image generation only)
+
+sd.cpp's image handler uses `TryLockModel` — if the requested model isn't already loaded, the FIRST call triggers a ~5-20 s load (depending on model size) while holding the lock. Any concurrent call inside that window returns 503 `another load or generation in progress`. LiteLLM's image-gen path reacts to a 503 by retrying (`num_retries: 3`) and walking the fallback chain. Every retry hits the same lock, every retry 503s, and the entire fallback chain ends with LiteLLM returning HTTP 200 with an EMPTY `data` array (a router-side bug where image-gen fallback exhaustion masquerades as success).
+
+The resource manager fixes this by issuing the explicit `POST /sdcpp/v1/load?model=<key>` blocking call inside the pre-call hook — while the cuda-img / cpu-img semaphore is still held. By the time LiteLLM dispatches the actual `POST /v1/images/generations`, the backend is fully warm and the call succeeds on attempt 1. No 503 storm, no fallback amplification, no empty-data response.
+
+The pre-load is a no-op (~ms) when the model is already loaded. A failed pre-load (model missing, weights corrupt, GPU OOM) is LOGGED rather than raised — LiteLLM then dispatches the call normally and the caller sees the real backend error rather than an indefinitely-blocked request.
 
 ### Unload mechanisms
 

@@ -162,12 +162,16 @@ async def _unload_cpu_llm():
             logger.warning("[resource_manager] cpu-llm unload error: %s", e)
 
 
+_SDCPP_CUDA_URL = "http://sdcpp-cuda:7234"
+_SDCPP_CPU_URL = "http://sdcpp:7234"
+
+
 async def _unload_cuda_img():
     """Tell sdcpp-cuda wrapper to unload the model context and free VRAM."""
     logger.warning("[resource_manager] unloading cuda-img (sdcpp-cuda)")
     async with httpx.AsyncClient(timeout=30.0) as client:
         try:
-            r = await client.post("http://sdcpp-cuda:7234/sdcpp/v1/unload")
+            r = await client.post(f"{_SDCPP_CUDA_URL}/sdcpp/v1/unload")
             logger.warning(
                 "[resource_manager] cuda-img unloaded, status=%s", r.status_code
             )
@@ -180,12 +184,78 @@ async def _unload_cpu_img():
     logger.warning("[resource_manager] unloading cpu-img (sdcpp)")
     async with httpx.AsyncClient(timeout=30.0) as client:
         try:
-            r = await client.post("http://sdcpp:7234/sdcpp/v1/unload")
+            r = await client.post(f"{_SDCPP_CPU_URL}/sdcpp/v1/unload")
             logger.warning(
                 "[resource_manager] cpu-img unloaded, status=%s", r.status_code
             )
         except Exception as e:
             logger.warning("[resource_manager] cpu-img unload error: %s", e)
+
+
+# Model-key extraction for sdcpp preload. LiteLLM aliases follow the
+# `local-sdcpp-{cuda,cpu}-<model-key>` shape — strip the prefix to get
+# what sdcpp's /sdcpp/v1/load endpoint expects.
+_SDCPP_CUDA_PREFIX = "local-sdcpp-cuda-"
+_SDCPP_CPU_PREFIX = "local-sdcpp-cpu-"
+
+
+async def _preload_sdcpp(base_url: str, model_key: str) -> None:
+    """POST /sdcpp/v1/load?model=<key> and block until sdcpp has the model
+    loaded.
+
+    Why this exists: sdcpp's image-gen handler `TryLockModel`-s on every
+    POST /v1/images/generations. If the model isn't loaded yet, the FIRST
+    call triggers an ~19s load while holding the lock — any concurrent
+    call within that window returns 503 "another load or generation in
+    progress". LiteLLM router responds to a 503 by retrying (num_retries=3)
+    and walking the fallback chain, every attempt hits the same lock,
+    every attempt 503s, and the whole storm ends with LiteLLM returning
+    HTTP 200 + empty `data` because image-gen fallback-exhaustion masks
+    the upstream error.
+
+    Pre-loading inside the resource_manager's pre_call hook (while we still
+    hold the cuda-img/cpu-img semaphore) means by the time LiteLLM
+    dispatches the actual image-gen call the backend is already warm and
+    the call succeeds on attempt 1. No 503, no fallback storm, no empty-
+    data response. Behaves as a no-op (~ms) when the requested model is
+    already loaded.
+
+    Failures here are LOGGED, not raised. If preload fails (model missing,
+    weights corrupt, GPU OOM), letting LiteLLM call the backend anyway
+    surfaces the real upstream error rather than blocking the request
+    forever.
+    """
+    async with httpx.AsyncClient(timeout=180.0) as client:
+        try:
+            r = await client.post(
+                f"{base_url}/sdcpp/v1/load",
+                params={"model": model_key},
+            )
+            if r.status_code == 200:
+                logger.warning(
+                    "[resource_manager] sdcpp preloaded model=%s body=%s",
+                    model_key, r.text[:200],
+                )
+            else:
+                logger.warning(
+                    "[resource_manager] sdcpp preload non-200 model=%s status=%s body=%s",
+                    model_key, r.status_code, r.text[:200],
+                )
+        except Exception as e:
+            logger.warning(
+                "[resource_manager] sdcpp preload error model=%s base=%s: %s",
+                model_key, base_url, e,
+            )
+
+
+def _sdcpp_key_for(model: str, group: str) -> tuple[str, str] | None:
+    """Map a LiteLLM model alias to (sdcpp base URL, sdcpp model key).
+    Returns None if the alias doesn't match the expected sdcpp shape."""
+    if group == "cuda-img" and model.startswith(_SDCPP_CUDA_PREFIX):
+        return _SDCPP_CUDA_URL, model[len(_SDCPP_CUDA_PREFIX):]
+    if group == "cpu-img" and model.startswith(_SDCPP_CPU_PREFIX):
+        return _SDCPP_CPU_URL, model[len(_SDCPP_CPU_PREFIX):]
+    return None
 
 
 # talkies — unified ASR + TTS; DELETE /api/ps/{model_id} per model. Lists
@@ -447,6 +517,19 @@ class ResourceManager(CustomLogger):
                     logger.warning(
                         "[resource_manager] unload error group=%s: %s", g, result
                     )
+
+            # For sdcpp (cuda-img / cpu-img), block here until the backend
+            # has the requested model loaded. See _preload_sdcpp() docstring
+            # for why — without this, LiteLLM's image-gen retry+fallback
+            # chain races the model-swap window and the caller gets HTTP 200
+            # + empty data instead of a real image. This is the only group
+            # where we pre-warm — other groups (talkies/vllm/llamacpp) own
+            # their own load lifecycles via lazy spawn + idle TTL and don't
+            # need an explicit ack-wait here.
+            sdcpp_target = _sdcpp_key_for(model, group)
+            if sdcpp_target is not None:
+                base_url, model_key = sdcpp_target
+                await _preload_sdcpp(base_url, model_key)
 
             logger.warning("[resource_manager] done for model=%s", model)
             return data
