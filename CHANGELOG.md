@@ -2,6 +2,70 @@
 
 All notable changes to this project are documented here.
 
+## [v3.14.0] — 2026-06-21
+
+**New service `flickies` — self-hosted video toolkit (sibling of audiolla / talkies). Lipsync via LatentSync 1.5 + Wav2Lip, face restore via GFPGAN v1.4, ffmpeg ops (trim / concat / transcode / scale / mux_audio / extract_audio / thumbnail_grid), ffprobe info. CPU + CUDA variants. 11 MCP tools.**
+
+Pinned at `psyb0t/flickies:v0.2.0` (CPU) and `psyb0t/flickies:v0.2.0-cuda`. Mirrors the audiolla integration shape exactly — same wire format (JSON body on every endpoint, raw bytes only at `PUT /v1/files/{path}`, `output_path` xor `output_url` for any tool that produces a video), same hot-swap eviction + idle unload, same `/data` bind mount layout for shared model cache between CPU and CUDA variants.
+
+### New service surface
+
+- `POST /flickies/v1/video/lipsync` — engines: `latentsync-1.5` (Apache-2.0, CUDA-only, ~8 GB VRAM, default on CUDA), `wav2lip` / `wav2lip-gan` (LRS2 non-commercial — gated on `FLICKIES_ENABLE_NONCOMMERCIAL=1`).
+- `POST /flickies/v1/video/restore` — engine: `gfpgan` (GFPGAN v1.4, Apache-2.0, CUDA-only). Chains after Wav2Lip to fix the soft 96×96 mouth crop, or stand-alone on any video.
+- `POST /flickies/v1/video/trim`, `concat`, `transcode` (incl. gif + fps + codec change), `scale`, `mux_audio`, `extract_audio`, `thumbnail_grid` — ffmpeg ops, CPU-only.
+- `POST /flickies/v1/video/info` — ffprobe metadata (duration, codec, fps, dimensions, bitrate).
+- `GET /flickies/v1/engines` — engines + load state + license posture; `POST /flickies/v1/engines/{slug}` triggers explicit eviction.
+- `PUT /flickies/v1/files/{path}` — stage raw video / audio bytes; `GET /flickies/v1/files/{path}` — fetch the result a tool wrote there.
+- `POST /flickies/v1/mcp/` — 11 MCP tools: `list_engines, info, lipsync, restore, transcode, trim, concat, scale, mux_audio, extract_audio, thumbnail_grid`. Surfaced in LiteLLM's aggregated `/mcp/` as `flickies-*` (CPU) and `flickies_cuda-*` (CUDA).
+- Tested ceiling per upstream: RTX 3060 12 GB — fits LatentSync 1.5 with headroom; Wav2Lip + GFPGAN chain peaks at ~5 GB. GFPGAN + LatentSync 1.5 are CUDA-only — the CPU image refuses to load them. CPU image runs all ffmpeg ops + slow Wav2Lip-CPU.
+
+### Config
+
+- Profile flags `FLICKIES=1` / `FLICKIES_CUDA=1` toggle the variants (same shape as `AUDIOLLA=1` / `AUDIOLLA_CUDA=1`).
+- `FLICKIES_AUTH_TOKEN` (defaults to `AIGATE_TOKEN`) — bearer for `/flickies/*`.
+- `FLICKIES_ENABLED_ENGINES` — comma-separated engine slug allow-list (empty = all).
+- `FLICKIES_PREFETCH_ALL=1` — pre-pull every available engine at boot (respects `cuda_only` + non-commercial gates); drops first-call latency on LatentSync from ~2.5 min to <200 ms.
+- `FLICKIES_IDLE_UNLOAD_SECS` (default 600) — idle TTL before resident engines are unloaded.
+- `FLICKIES_MAX_UPLOAD_BYTES` (default 500 MB) — upload cap; nginx route's `client_max_body_size` set from the same env var.
+- `FLICKIES_LOG_FILE` (default `/data/logs/flickies.log`) — rotating JSON log file (50 MB × 5 backups). stderr carries the same lines.
+- `FLICKIES_ENABLE_NONCOMMERCIAL=1` — LRS2 opt-in for Wav2Lip / Wav2Lip-GAN. Same gate pattern as audiolla's `AUDIOLLA_ENABLE_NONCOMMERCIAL` for matchering / MusicGen.
+- `FLICKIES_OFFLINE=1` — disable auto-download; operator stages HF snapshots under `${DATA_DIR_FLICKIES}/hf/hub/models--*/` manually.
+- `RATELIMIT_FLICKIES[_BURST]` / `RATELIMIT_FLICKIES_CUDA[_BURST]` (default `30r/m`, burst `20`) — nginx rate-limit zones.
+- `TIMEOUT_FLICKIES` (default `24h`) — nginx proxy timeout; lipsync / restore on multi-minute clips can run for several minutes.
+- `DATA_DIR_FLICKIES` (default `${DATA_DIR}/flickies`) — bind-mounted as `/data` in both containers (shared between CPU + CUDA, so the second variant to boot reuses the first's downloads with zero re-fetch).
+
+### Files
+
+- `docker-compose.yml` — new `flickies` + `flickies-cuda` service blocks, new `/flickies/` + `/flickies-cuda/` nginx routes, new `flickies` + `flickies_cuda` rate-limit zones, `FLICKIES_AUTH_TOKEN` passthrough on the `litellm` service so LiteLLM's `os.environ/FLICKIES_AUTH_TOKEN` MCP auth resolution works.
+- `Makefile` — `FLICKIES=1` / `FLICKIES_CUDA=1` profile autodetect; `flickies` + `flickies-cuda` added to `COMPOSE_PROFILES` macro.
+- `.env.example` — `FLICKIES=` / `FLICKIES_CUDA=` flags + every tunable (auth, device, engines, prefetch, idle-unload, upload cap, rate limit, fetch policy, log file, noncommercial gate, webhook secret), plus `RATELIMIT_FLICKIES[_CUDA][_BURST]`, `TIMEOUT_FLICKIES`, `DATA_DIR_FLICKIES`.
+- `recommend-limits.sh` — `flag_flickies` / `flag_flickies_cuda` parsed from `.env`; included in the "Enabled:" summary line.
+- `litellm/build-config.py` — `flickies` + `flickies-cuda` MCP fragment auto-discovery.
+- `litellm/config/mcp/flickies.yaml` + `litellm/config/mcp/flickies-cuda.yaml` — MCP registrations, bearer auth, `Host: 127.0.0.1:8000` static-header override (FastMCP's DNS-rebinding protection rejects `Host: flickies:8000` otherwise, returning 421).
+- `docs/services/flickies.md` — full service page (endpoint table, env-var reference, lipsync + restore + ffmpeg curl recipes).
+- `docs/services/README.md`, `docs/README.md` — index entries.
+- `docs/mcp-tools.md` — flickies MCP section (11 tools + per-tool table).
+- `README.md` — Tools-and-capabilities bullet, services-table row, ASCII routing diagram (routes block + MCP-servers block), `.data/` directory table, profile-flag enable table.
+- `.gitignore` + `.data/flickies/.gitkeep` — keep the empty data dir in the tree but ignore weight cache contents.
+- `tests/test_flickies.sh` — 4 assertions per variant (healthz_open, requires_auth, engines_list, mcp_tools_present). Total 8 tests; reuses the audiolla CPU/CUDA gating pattern.
+
+### Other ASCII-diagram fix
+
+- README routing diagram's "MCP servers" block now lists `piston (via mcp_tools)` as a callout pointing at the `execute_code` tool it powers — previously piston was only mentioned in the `mcp_tools` line itself. Piston still doesn't run its own MCP server (upstream `engineer-man/piston` exposes only REST); the `execute_code` MCP tool wrapping it lives inside the `mcp_tools` aggregator service. The diagram now makes that relationship visible to anyone scanning the ASCII for "where does piston show up in MCP".
+
+### Live-verified
+
+- Both `psyb0t/flickies:v0.2.0` + `:v0.2.0-cuda` running, both healthy.
+- `/flickies/healthz` + `/flickies-cuda/healthz` → 200.
+- `/flickies/v1/engines` + `/flickies-cuda/v1/engines` → wav2lip, wav2lip-gan, latentsync-1.5 (cuda_only), gfpgan.
+- `/flickies/v1/mcp/` + `/flickies-cuda/v1/mcp/` → 11 tools each.
+- Aggregated `/mcp/` → 22 flickies tools surfaced (`flickies-*` + `flickies_cuda-*`).
+- `tests/test_flickies.sh` → 8/8 pass.
+
+### Caveats
+
+- `psyb0t/flickies:v0.2.0` and `:v0.2.0-cuda` may not be on Docker Hub at the moment this tag is cut. Fresh `docker compose up` against a clone with no local images will pull-404 until upstream publishes — or operators need to build locally from `github.com/psyb0t/docker-flickies@v0.2.0`.
+
 ## [v3.13.0] — 2026-06-21
 
 **Fix sd.cpp image-gen flakiness — resource_manager now blocking-pre-loads sd.cpp models inside the pre-call hook so LiteLLM never dispatches an image-gen call against a cold or mid-loading backend.**

@@ -1,0 +1,14 @@
+flickies_cuda:
+  url: "http://flickies-cuda:8000/v1/mcp/"
+  transport: "http"
+  auth_type: "bearer_token"
+  auth_value: os.environ/FLICKIES_AUTH_TOKEN
+  # FastMCP's DNS-rebinding protection rejects requests whose Host header
+  # isn't in its allowlist (default: localhost / 127.0.0.1). Without this
+  # override, LiteLLM sends Host: flickies-cuda:8000 (compose service name)
+  # and FastMCP returns 421 Misdirected Request. Spoofing Host: 127.0.0.1
+  # gets us past the check; the request is already inside aigate-internal
+  # so no actual rebinding risk.
+  static_headers:
+    Host: "127.0.0.1:8000"
+  description: "Self-hosted video toolkit (NVIDIA GPU variant of flickies — faster Wav2Lip, plus the only place LatentSync 1.5 and GFPGAN actually load; CPU image refuses both). Same JSON-body contract as the CPU `flickies` MCP — see that fragment's description for the full per-tool list and the input/output rules (file_path xor file_url for input, output_path xor output_url for any tool that produces video). Tested ceiling: RTX 3060 12 GB — fits LatentSync 1.5 (~8 GB) with headroom; Wav2Lip + GFPGAN chain peaks at ~5 GB. One engine resident at a time — different model request triggers hot-swap eviction. Use this when you want LatentSync, GFPGAN, or a forced-GPU Wav2Lip path; use `flickies` for ffmpeg ops + slow Wav2Lip-CPU. Both share ${DATA_DIR_FLICKIES} for model weights (S3FD / Wav2Lip / GFPGAN / LatentSync) so they pull each others' cached files. Tools namespaced as `flickies_cuda-<tool>` in the aggregated /mcp/. See github.com/psyb0t/docker-flickies README for full per-tool params."

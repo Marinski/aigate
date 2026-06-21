@@ -1,0 +1,14 @@
+flickies:
+  url: "http://flickies:8000/v1/mcp/"
+  transport: "http"
+  auth_type: "bearer_token"
+  auth_value: os.environ/FLICKIES_AUTH_TOKEN
+  # FastMCP's DNS-rebinding protection rejects requests whose Host header
+  # isn't in its allowlist (default: localhost / 127.0.0.1). Without this
+  # override, LiteLLM sends Host: flickies:8000 (compose service name)
+  # and FastMCP returns 421 Misdirected Request. Spoofing Host: 127.0.0.1
+  # gets us past the check; the request is already inside aigate-internal
+  # so no actual rebinding risk.
+  static_headers:
+    Host: "127.0.0.1:8000"
+  description: "Self-hosted video toolkit — sibling of audiolla (audio) and talkies (speech). 11 MCP tools across lipsync, face restore, and ffmpeg ops. Lipsync engines: LatentSync 1.5 (ByteDance, Apache-2.0, default on CUDA, ~8 GB VRAM) and Wav2Lip / Wav2Lip-GAN (Rudrabha, LRS2 non-commercial, gated on FLICKIES_ENABLE_NONCOMMERCIAL=1; fast and low-VRAM). Face restore: GFPGAN v1.4 (TencentARC, Apache-2.0) — chains after Wav2Lip to fix the soft 96×96 mouth crop, or stand-alone. ffmpeg ops (CPU): trim, concat, transcode (incl. gif + fps + codec change), scale, mux audio, extract audio, thumbnail grid. Info: ffprobe metadata. Same wire format + async-job model as audiolla — every endpoint takes a JSON body; raw bytes only at PUT /v1/files/{path}; video-producing tools require output_path (stages under FILES_DIR — caller fetches via /v1/files) XOR output_url (server PUTs to a presigned URL). Tools: list_engines, info, lipsync, restore, transcode, trim, concat, scale, mux_audio, extract_audio, thumbnail_grid. Hot-swap eviction with idle unload after FLICKIES_IDLE_UNLOAD_SECS (default 600). GFPGAN + LatentSync 1.5 are CUDA-only — the CPU variant refuses to load them. See github.com/psyb0t/docker-flickies README for full per-tool params and the openapi.yaml contract."

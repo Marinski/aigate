@@ -82,6 +82,8 @@ Thumbs.db
 !.data/vllm/.gitkeep
 !.data/audiolla/
 !.data/audiolla/.gitkeep
+!.data/flickies/
+!.data/flickies/.gitkeep
 
 ANUSTIMES.md
 BRUTAL_REVIEW.md

@@ -300,3 +300,38 @@ See [the mailbox service page](services/mailbox.md) for the full setup (config s
 | `reader`    | bool                  | Strip HTML body to clean text/markdown (html2text)                   | `false`       |
 
 See the [docker-mailbox README](https://github.com/psyb0t/docker-mailbox) for the full per-tool parameter shape, including `send`'s `to`/`cc`/`bcc`/`subject`/`body`/`attachments` and bulk-update semantics.
+
+---
+
+## flickies — Video toolkit (`FLICKIES=1` or `FLICKIES_CUDA=1`)
+
+MCP server backed by [docker-flickies](https://github.com/psyb0t/docker-flickies). Sibling of audiolla (audio) and talkies (speech) — lipsync, face restore, and ffmpeg ops behind one wire format.
+
+**11 tools, three families:**
+
+- **Lipsync** — `lipsync`. Engines: `latentsync-1.5` (Apache-2.0, CUDA-only, ~8 GB VRAM, default), `wav2lip` / `wav2lip-gan` (LRS2 non-commercial, gated on `FLICKIES_ENABLE_NONCOMMERCIAL=1`).
+- **Face restore** — `restore`. Engine: `gfpgan` (GFPGAN v1.4, Apache-2.0, CUDA-only). Chains after Wav2Lip to fix the soft 96×96 mouth crop, or stand-alone on any video.
+- **ffmpeg ops** (CPU, no GPU needed) — `trim`, `concat`, `transcode` (mp4 / mov / webm / gif + fps + codec change), `scale`, `mux_audio`, `extract_audio`, `thumbnail_grid`.
+- **Info** — `info` (ffprobe metadata), `list_engines` (configured engines + load state).
+
+Same JSON-body contract as audiolla — every tool takes a request body; **the only multipart route is `PUT /v1/files/{path}` for staging raw bytes**. Video-producing tools require `output_path` (server stages under `${DATA_DIR_FLICKIES}/files` — fetch via `GET /v1/files/<path>`) XOR `output_url` (server PUTs to a presigned URL). Input is `file_path` (FILES_DIR-relative, after staging) XOR `file_url` (server fetches, subject to `FLICKIES_ALLOW_PRIVATE_FETCH`).
+
+Via LiteLLM's `/mcp/` aggregator each tool is prefixed `flickies-` (e.g. `flickies-lipsync`) on the CPU variant and `flickies_cuda-` on the CUDA variant. Direct calls to `/flickies/v1/mcp/` see the raw, unprefixed names.
+
+Hot-swap eviction: one engine resident at a time per container — different model requested → current model evicted. Idle longer than `FLICKIES_IDLE_UNLOAD_SECS` (default 600) → unloaded by the sweeper.
+
+| Tool             | Description |
+| ---------------- | ----------- |
+| `list_engines`   | Configured engines + their loaded/unloaded state + license posture |
+| `info`           | ffprobe metadata — duration, codec, fps, dimensions, bitrate |
+| `lipsync`        | Sync mouth to new audio (LatentSync 1.5 default, Wav2Lip / -GAN behind the noncommercial gate) |
+| `restore`        | GFPGAN face restoration — sharpens / de-blurs faces frame-by-frame |
+| `transcode`      | Codec / format / fps / bitrate change. Handles gif output. |
+| `trim`           | Cut by start_sec / end_sec |
+| `concat`         | Concatenate N inputs (re-encode or stream copy) |
+| `scale`          | Resize to target W × H |
+| `mux_audio`      | Replace or overlay the audio track on a video |
+| `extract_audio`  | Strip audio to a standalone file (any codec ffmpeg supports) |
+| `thumbnail_grid` | Tiled grid of evenly-spaced thumbnails |
+
+See the [docker-flickies README](https://github.com/psyb0t/docker-flickies) for the full per-tool parameter shape and the canonical `openapi.yaml`.

@@ -16,6 +16,7 @@ The big ones at a glance:
 - [vllm / vllm-cuda](services/vllm.md) — text LLMs + embeddings via `vllm serve`
 - [talkies / talkies-cuda](services/talkies.md) — Whisper / Canary / Parakeet / Nemotron + Kokoro + Qwen3-TTS
 - [audiolla / audiolla-cuda](services/audiolla.md) — audio production REST + MCP (stem sep / mastering / MIR / MIDI / text-to-audio)
+- [flickies / flickies-cuda](services/flickies.md) — video toolkit REST + MCP (lipsync via LatentSync 1.5 + Wav2Lip, GFPGAN face restore, ffmpeg ops)
 - [sd.cpp](services/sdcpp.md) — local image generation
 - [LiteLLM](services/litellm.md) — OpenAI-compatible gateway
 - [piston](services/piston.md) — sandboxed multi-language code execution (50+ langs), nsjail isolation, REST + MCP tool any function-calling LLM can call

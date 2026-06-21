@@ -121,6 +121,8 @@ def active_mcp_servers(env):
         ("predictalot-cuda", lambda e: is_flag(e, "PREDICTALOT_CUDA")),
         ("audiolla",      lambda e: is_flag(e, "AUDIOLLA")),
         ("audiolla-cuda", lambda e: is_flag(e, "AUDIOLLA_CUDA")),
+        ("flickies",      lambda e: is_flag(e, "FLICKIES")),
+        ("flickies-cuda", lambda e: is_flag(e, "FLICKIES_CUDA")),
         ("mcp",           lambda e: any(
             is_flag(e, f) for f in ("HUGGINGFACE", "OPENAI", "TALKIES", "TALKIES_CUDA", "SDCPP", "SDCPP_CUDA", "SEARXNG")
         )),

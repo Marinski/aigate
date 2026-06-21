@@ -95,6 +95,7 @@ services:
       # be repeated here.
       PREDICTALOT_AUTH_TOKEN: ${PREDICTALOT_AUTH_TOKEN:-${AIGATE_TOKEN:-lulz-4-security-predictalot}}
       AUDIOLLA_AUTH_TOKEN: ${AUDIOLLA_AUTH_TOKEN:-${AIGATE_TOKEN:-lulz-4-security-audiolla}}
+      FLICKIES_AUTH_TOKEN: ${FLICKIES_AUTH_TOKEN:-${AIGATE_TOKEN:-lulz-4-security-flickies}}
       UI_USERNAME: ${LITELLM_USERNAME:-}
       UI_PASSWORD: ${LITELLM_PASSWORD:-}
     depends_on:
@@ -354,6 +355,112 @@ services:
       timeout: 10s
       retries: 5
       start_period: 120s
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - aigate-internal
+      - aigate-public
+
+  # flickies (video sibling of audiolla) — CPU + CUDA variants live
+  # side-by-side on distinct network aliases + nginx routes so both can
+  # run at once: CPU under `flickies` at /flickies/*, CUDA under
+  # `flickies-cuda` at /flickies-cuda/*. MCP endpoints follow the same
+  # split — /flickies/v1/mcp and /flickies-cuda/v1/mcp respectively. Not
+  # registered with LiteLLM (no chat/completion surface). They share
+  # ${DATA_DIR_FLICKIES} for the weight cache (S3FD / Wav2Lip / GFPGAN /
+  # LatentSync 1.5) so enabling both does not duplicate the ~6 GB of
+  # downloads. Upstream: github.com/psyb0t/docker-flickies.
+  flickies:
+    profiles: ["flickies"]
+    image: psyb0t/flickies:v0.2.0
+    restart: unless-stopped
+    mem_limit: ${FLICKIES_MEM_LIMIT:-8g}
+    memswap_limit: ${FLICKIES_MEMSWAP_LIMIT:-16g}
+    cpus: ${FLICKIES_CPUS:-4.0}
+    environment:
+      FLICKIES_AUTH_TOKEN: ${FLICKIES_AUTH_TOKEN:-${AIGATE_TOKEN:-lulz-4-security-flickies}}
+      FLICKIES_HOST: 0.0.0.0
+      FLICKIES_PORT: "8000"
+      FLICKIES_DEVICE: ${FLICKIES_DEVICE:-cpu}
+      FLICKIES_DATA_DIR: /data
+      FLICKIES_ENABLED_ENGINES: ${FLICKIES_ENABLED_ENGINES:-}
+      # Pre-pull every engine listed in FLICKIES_ENABLED_ENGINES at boot
+      # (before uvicorn starts). Drops first-call latency from ~2.5min
+      # (LatentSync cold) to <200ms. FLICKIES_PREFETCH_ALL=1 covers
+      # everything (respects cuda_only + noncommercial gates). FLICKIES_
+      # OFFLINE=1 disables auto-download — operators stage HF snapshots
+      # under ${DATA_DIR_FLICKIES}/hf manually.
+      FLICKIES_PREFETCH_ALL: ${FLICKIES_PREFETCH_ALL:-}
+      FLICKIES_IDLE_UNLOAD_SECS: ${FLICKIES_IDLE_UNLOAD_SECS:-600}
+      FLICKIES_MAX_UPLOAD_BYTES: ${FLICKIES_MAX_UPLOAD_BYTES:-524288000}
+      FLICKIES_RATE_LIMIT_PER_MIN: ${FLICKIES_RATE_LIMIT_PER_MIN:-0}
+      FLICKIES_FETCH_TIMEOUT_SECS: ${FLICKIES_FETCH_TIMEOUT_SECS:-30}
+      FLICKIES_ALLOW_PRIVATE_FETCH: ${FLICKIES_ALLOW_PRIVATE_FETCH:-false}
+      FLICKIES_OFFLINE: ${FLICKIES_OFFLINE:-}
+      FLICKIES_LOG_LEVEL: ${FLICKIES_LOG_LEVEL:-INFO}
+      # Rotating JSON log file. 50 MB x 5 backups. stderr always carries
+      # the same lines; this is for tailing/grepping after the fact.
+      FLICKIES_LOG_FILE: ${FLICKIES_LOG_FILE:-/data/logs/flickies.log}
+      # LRS2 non-commercial opt-in for Wav2Lip / Wav2Lip-GAN weights.
+      # Same gate pattern audiolla's matchering uses for GPL v3 / MusicGen.
+      # Unset → server refuses to load these engines. LatentSync 1.5
+      # (Apache-2.0) is unaffected.
+      FLICKIES_ENABLE_NONCOMMERCIAL: ${FLICKIES_ENABLE_NONCOMMERCIAL:-}
+      FLICKIES_WEBHOOK_SECRET: ${FLICKIES_WEBHOOK_SECRET:-}
+    volumes:
+      - ${DATA_DIR_FLICKIES:-${DATA_DIR:-.data}/flickies}:/data
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz',timeout=5).status==200 else 1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - aigate-internal
+      - aigate-public
+
+  flickies-cuda:
+    profiles: ["flickies-cuda"]
+    image: psyb0t/flickies:v0.2.0-cuda
+    restart: unless-stopped
+    mem_limit: ${FLICKIES_CUDA_MEM_LIMIT:-16g}
+    memswap_limit: ${FLICKIES_CUDA_MEMSWAP_LIMIT:-32g}
+    cpus: ${FLICKIES_CUDA_CPUS:-4.0}
+    environment:
+      FLICKIES_AUTH_TOKEN: ${FLICKIES_AUTH_TOKEN:-${AIGATE_TOKEN:-lulz-4-security-flickies}}
+      FLICKIES_HOST: 0.0.0.0
+      FLICKIES_PORT: "8000"
+      FLICKIES_DEVICE: ${FLICKIES_CUDA_DEVICE:-cuda}
+      FLICKIES_DATA_DIR: /data
+      FLICKIES_ENABLED_ENGINES: ${FLICKIES_ENABLED_ENGINES:-}
+      FLICKIES_PREFETCH_ALL: ${FLICKIES_PREFETCH_ALL:-}
+      FLICKIES_IDLE_UNLOAD_SECS: ${FLICKIES_IDLE_UNLOAD_SECS:-600}
+      FLICKIES_MAX_UPLOAD_BYTES: ${FLICKIES_MAX_UPLOAD_BYTES:-524288000}
+      FLICKIES_RATE_LIMIT_PER_MIN: ${FLICKIES_RATE_LIMIT_PER_MIN:-0}
+      FLICKIES_FETCH_TIMEOUT_SECS: ${FLICKIES_FETCH_TIMEOUT_SECS:-30}
+      FLICKIES_ALLOW_PRIVATE_FETCH: ${FLICKIES_ALLOW_PRIVATE_FETCH:-false}
+      FLICKIES_OFFLINE: ${FLICKIES_OFFLINE:-}
+      FLICKIES_LOG_LEVEL: ${FLICKIES_LOG_LEVEL:-INFO}
+      FLICKIES_LOG_FILE: ${FLICKIES_LOG_FILE:-/data/logs/flickies.log}
+      FLICKIES_ENABLE_NONCOMMERCIAL: ${FLICKIES_ENABLE_NONCOMMERCIAL:-}
+      FLICKIES_WEBHOOK_SECRET: ${FLICKIES_WEBHOOK_SECRET:-}
+    volumes:
+      - ${DATA_DIR_FLICKIES:-${DATA_DIR:-.data}/flickies}:/data
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz',timeout=5).status==200 else 1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 180s
     security_opt:
       - no-new-privileges:true
     networks:
@@ -1630,6 +1737,40 @@ configs:
               proxy_cache off;
           }
 
+          # flickies — self-hosted video toolkit (direct route, not via LiteLLM)
+          location /flickies/ {
+              limit_req zone=flickies burst=${RATELIMIT_FLICKIES_BURST:-20} nodelay;
+              client_max_body_size ${FLICKIES_MAX_UPLOAD_BYTES:-524288000};
+              set $$upstream_flickies http://flickies:8000;
+              rewrite ^/flickies/(.*) /$$1 break;
+              proxy_pass $$upstream_flickies;
+              proxy_set_header Host $$http_host;
+              proxy_set_header X-Real-IP $$remote_addr;
+              proxy_set_header X-Forwarded-For $$proxy_add_x_forwarded_for;
+              proxy_set_header X-Forwarded-Proto $$scheme;
+              proxy_read_timeout ${TIMEOUT_FLICKIES:-24h};
+              proxy_send_timeout ${TIMEOUT_FLICKIES:-24h};
+              proxy_buffering off;
+              proxy_cache off;
+          }
+
+          # flickies-cuda — GPU sibling on its own route + alias
+          location /flickies-cuda/ {
+              limit_req zone=flickies_cuda burst=${RATELIMIT_FLICKIES_CUDA_BURST:-20} nodelay;
+              client_max_body_size ${FLICKIES_MAX_UPLOAD_BYTES:-524288000};
+              set $$upstream_flickies_cuda http://flickies-cuda:8000;
+              rewrite ^/flickies-cuda/(.*) /$$1 break;
+              proxy_pass $$upstream_flickies_cuda;
+              proxy_set_header Host $$http_host;
+              proxy_set_header X-Real-IP $$remote_addr;
+              proxy_set_header X-Forwarded-For $$proxy_add_x_forwarded_for;
+              proxy_set_header X-Forwarded-Proto $$scheme;
+              proxy_read_timeout ${TIMEOUT_FLICKIES:-24h};
+              proxy_send_timeout ${TIMEOUT_FLICKIES:-24h};
+              proxy_buffering off;
+              proxy_cache off;
+          }
+
           # stealthy-auto-browse cluster — HAProxy → browser replicas
           location /stealthy-auto-browse/ {
               limit_req zone=browser burst=${RATELIMIT_BROWSER_BURST:-10} nodelay;
@@ -1862,6 +2003,8 @@ configs:
       limit_req_zone $$binary_remote_addr zone=predictalot_cuda:10m rate=${RATELIMIT_PREDICTALOT_CUDA:-60r/m};
       limit_req_zone $$binary_remote_addr zone=audiolla:10m rate=${RATELIMIT_AUDIOLLA:-30r/m};
       limit_req_zone $$binary_remote_addr zone=audiolla_cuda:10m rate=${RATELIMIT_AUDIOLLA_CUDA:-30r/m};
+      limit_req_zone $$binary_remote_addr zone=flickies:10m rate=${RATELIMIT_FLICKIES:-30r/m};
+      limit_req_zone $$binary_remote_addr zone=flickies_cuda:10m rate=${RATELIMIT_FLICKIES_CUDA:-30r/m};
       limit_req_zone $$binary_remote_addr zone=mailbox:10m rate=${RATELIMIT_MAILBOX:-60r/m};
       limit_req_zone $$binary_remote_addr zone=piston:10m rate=${RATELIMIT_PISTON:-30r/m};
 

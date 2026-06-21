@@ -108,6 +108,16 @@ ifeq ($(strip $(AUDIOLLA_CUDA)),1)
   _PROFILES += audiolla-cuda
 endif
 
+# flickies: opt-in with FLICKIES=1
+ifeq ($(strip $(FLICKIES)),1)
+  _PROFILES += flickies
+endif
+
+# flickies CUDA: opt-in with FLICKIES_CUDA=1
+ifeq ($(strip $(FLICKIES_CUDA)),1)
+  _PROFILES += flickies-cuda
+endif
+
 # vllm (CPU): opt-in with VLLM=1
 ifeq ($(strip $(VLLM)),1)
   _PROFILES += vllm
@@ -207,7 +217,7 @@ run-bg:
 	docker compose up -d --build --force-recreate
 
 down:
-	COMPOSE_PROFILES=claudebox,pibox-zai,cloudflared,hybrids3,browser,ollama,ollama-cuda,sdcpp,sdcpp-cuda,talkies,talkies-cuda,vllm,vllm-cuda,mcp,librechat,searxng,telethon,tailscale,predictalot,predictalot-cuda,audiolla,audiolla-cuda,mailbox \
+	COMPOSE_PROFILES=claudebox,pibox-zai,cloudflared,hybrids3,browser,ollama,ollama-cuda,sdcpp,sdcpp-cuda,talkies,talkies-cuda,vllm,vllm-cuda,mcp,librechat,searxng,telethon,tailscale,predictalot,predictalot-cuda,audiolla,audiolla-cuda,flickies,flickies-cuda,mailbox \
 		docker compose down --remove-orphans
 
 restart: down run-bg
