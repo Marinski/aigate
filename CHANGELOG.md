@@ -2,6 +2,46 @@
 
 All notable changes to this project are documented here.
 
+## [v3.14.1] — 2026-06-22
+
+**Bump pibox v0.11.0 → v0.11.1 — tracks aicodebox v0.9.1 base; schema-mode retry prompt now carries the original task.**
+
+Upstream pibox v0.11.1 pulls in an aicodebox v0.9.1 bug fix that improves schema-mode retry success rates on the `/pibox-zai/openai/v1/chat/completions` route. PiAdapter contract unchanged. Wire shape unchanged. No code, config, or doc changes on the aigate side beyond the image tag.
+
+### What v0.11.1 fixes
+
+The schema-mode retry helper has been running with `no_continue=True` (fresh session, no history — prevents the model from doubling down on its bad answer) since the schema validation feature shipped. But the retry prompt the helper built only carried `bad output + parse error + schema`. The **original task was missing** from each retry body.
+
+For schemas where correction depends on task context (large enum picks, allowed-values lists, domain identifiers), the retry agent had near-zero chance of correcting — it would either re-pick blindly or fall back to prose. Schema-set callers saw repeated 422 / schema-exhaustion failures on prompts that the base model would have answered correctly given the original task.
+
+v0.11.1 re-states the original task in each retry body, sectioned for clarity:
+
+```
+- Original task ───
+- Your previous (invalid) response ───
+- Parse / validation error ───
+- Required schema ───
+```
+
+Net effect: retries succeed more often, so cumulative token usage on retrying schema runs should DROP even though each individual retry prompt is slightly longer (it now carries the original task too).
+
+### aigate-side
+
+`tests/test_pibox.sh` doesn't exercise the schema retry path (no `x-aicodebox-json-schema` header, no `response_format` body field), so the test suite stays as-is.
+
+### Files
+
+- `docker-compose.yml` — `psyb0t/pibox:v0.11.0` → `:v0.11.1`.
+
+### Live-verified
+
+- `psyb0t/pibox:v0.11.1` recreated, healthy.
+- `tests/test_pibox.sh` — 7/7 green.
+
+### Caveats
+
+- `psyb0t/pibox:v0.11.1` and the underlying `psyb0t/aicodebox:v0.9.1` may not be published on Docker Hub at the moment this tag is cut. Fresh `docker compose up` against a clone with no local images will pull-404 until upstream publishes — or operators need to build locally from `github.com/psyb0t/docker-pibox@v0.11.1`.
+
 ## [v3.14.0] — 2026-06-21
 
 **New service `flickies` — self-hosted video toolkit (sibling of audiolla / talkies). Lipsync via LatentSync 1.5 + Wav2Lip, face restore via GFPGAN v1.4, ffmpeg ops (trim / concat / transcode / scale / mux_audio / extract_audio / thumbnail_grid), ffprobe info. CPU + CUDA variants. 11 MCP tools.**
