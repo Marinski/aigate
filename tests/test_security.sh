@@ -840,7 +840,7 @@ test_sec_prompt_injection_key_leak() {
         out=$(curl -sf -X POST "$BASE_URL/chat/completions" \
             -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
             -H "Content-Type: application/json" \
-            -d "{\"model\":\"groq-llama-3.1-8b\",\"messages\":[{\"role\":\"user\",\"content\":$(python3 -c "import json; print(json.dumps('$prompt'))")}]}" 2>/dev/null || true)
+            -d "{\"model\":\"groq-gpt-oss-20b\",\"messages\":[{\"role\":\"user\",\"content\":$(python3 -c "import json; print(json.dumps('$prompt'))")}]}" 2>/dev/null || true)
         # check response doesn't contain actual secrets
         if echo "$out" | grep -q "$LITELLM_MASTER_KEY"; then
             echo "  FAIL: prompt injection leaked LITELLM_MASTER_KEY"

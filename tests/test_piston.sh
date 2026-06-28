@@ -237,7 +237,7 @@ test_piston_e2e_groq_drives_execute_code() {
         return 0
     fi
 
-    local llm_model="groq-llama-3.3-70b"
+    local llm_model="groq-gpt-oss-120b"
 
     # Step 1: prompt the LLM with the execute_code tool definition.
     local step1

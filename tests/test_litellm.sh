@@ -32,28 +32,25 @@ EXPECTED_MODELS=(
     "pibox-zai-glm-4.7"
     "pibox-zai-glm-4.5-air"
     # Groq
-    "groq-llama-3.1-8b"
-    "groq-llama-3.3-70b"
-    "groq-llama-4-scout"
-    "groq-kimi-k2"
-    "groq-qwen3-32b"
     "groq-gpt-oss-20b"
     "groq-gpt-oss-120b"
+    "groq-gpt-oss-safeguard-20b"
+    "groq-qwen3.6-27b"
     "groq-compound"
     "groq-compound-mini"
     "groq-whisper-large-v3"
     "groq-whisper-large-v3-turbo"
     # Cerebras
-    "cerebras-qwen3-235b"
     "cerebras-gpt-oss-120b"
-    "cerebras-llama-3.1-8b"
     "cerebras-glm-4.7"
     # OpenRouter
     "or-hermes-3-405b"
     "or-qwen3-coder"
     "or-qwen3-80b"
     "or-nemotron-120b"
-    "or-minimax-m2.5"
+    "or-nemotron-ultra-550b"
+    "or-nemotron-nano-9b"
+    "or-nemotron-nano-30b"
     "or-llama-3.3-70b"
     "or-gpt-oss-120b"
     "or-gpt-oss-20b"
@@ -210,7 +207,7 @@ test_litellm_auth() {
 test_litellm_chat_completion() {
     local out
     out=$(post "$BASE_URL/chat/completions" \
-        '{"model":"groq-llama-3.1-8b","messages":[{"role":"user","content":"respond with exactly the word XYZPONG7742 and nothing else"}]}')
+        '{"model":"groq-gpt-oss-20b","messages":[{"role":"user","content":"respond with exactly the word XYZPONG7742 and nothing else"}]}')
     assert_contains "$out" "XYZPONG7742" "chat completion response" || return 1
     assert_contains "$out" "choices" "chat completion has choices" || return 1
     assert_contains "$out" "usage" "chat completion has usage" || return 1
@@ -224,7 +221,7 @@ test_litellm_chat_stream() {
     out=$(curl -sf -X POST "$BASE_URL/chat/completions" \
         -H "Content-Type: application/json" \
         -H "$AUTH_HEADER" \
-        -d '{"model":"groq-llama-3.1-8b","messages":[{"role":"user","content":"respond with exactly STREAMPONG and nothing else"}],"stream":true}')
+        -d '{"model":"groq-gpt-oss-20b","messages":[{"role":"user","content":"respond with exactly STREAMPONG and nothing else"}],"stream":true}')
 
     assert_contains "$out" "data:" "returns SSE" || return 1
     assert_contains "$out" "[DONE]" "ends with DONE" || return 1

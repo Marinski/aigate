@@ -151,7 +151,7 @@ messages = [{"role": "user", "content":
 # agentic loop — max 10 turns
 for turn in range(10):
     r = requests.post(f"{base_url}/v1/chat/completions", headers=headers,
-        json={"model": "groq-llama-3.3-70b", "messages": messages,
+        json={"model": "groq-gpt-oss-120b", "messages": messages,
               "tools": tools, "tool_choice": "auto"}, timeout=60)
     resp = r.json()
     if "error" in resp:

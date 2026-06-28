@@ -69,7 +69,7 @@ import requests, json, sys
 text = sys.argv[1][:500]
 r = requests.post('$BASE_URL/chat/completions',
     headers={'Authorization': 'Bearer $LITELLM_MASTER_KEY', 'Content-Type': 'application/json'},
-    json={'model':'groq-llama-3.1-8b','messages':[{'role':'user','content':'What website is this text from? Answer in one word: ' + text}]},
+    json={'model':'groq-gpt-oss-20b','messages':[{'role':'user','content':'What website is this text from? Answer in one word: ' + text}]},
     timeout=30)
 print(r.text)
 " "$page_text" 2>/dev/null)
@@ -92,7 +92,7 @@ test_integration_llm_mcp_tools() {
     out=$(curl -sf -X POST "$BASE_URL/chat/completions" \
         -H "Content-Type: application/json" \
         -H "$AUTH_HEADER" \
-        -d '{"model":"groq-llama-3.1-8b","messages":[{"role":"user","content":"respond with exactly the word INTEGRATION7742 and nothing else"}]}')
+        -d '{"model":"groq-gpt-oss-20b","messages":[{"role":"user","content":"respond with exactly the word INTEGRATION7742 and nothing else"}]}')
     assert_contains "$out" "INTEGRATION7742" "LLM responds" || return 1
     echo "OK: integration_llm_mcp_tools"
 }

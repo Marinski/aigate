@@ -33,7 +33,7 @@ test_proxq_async_job_lifecycle() {
         -H "Content-Type: application/json" \
         -H "$AUTH_HEADER" \
         -w "\n%{http_code}" \
-        -d '{"model": "cerebras-llama-3.1-8b", "messages": [{"role": "user", "content": "say ok"}], "max_tokens": 5}')
+        -d '{"model": "cerebras-gpt-oss-120b", "messages": [{"role": "user", "content": "say ok"}], "max_tokens": 5}')
 
     local submit_body submit_code
     submit_code=$(echo "$submit_resp" | tail -1)

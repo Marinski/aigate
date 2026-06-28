@@ -2,6 +2,24 @@
 
 All notable changes to this project are documented here.
 
+## [v3.14.3] — 2026-06-28
+
+**Test-script catch-up to v3.14.2 provider audit. No prod / API / docs changes.**
+
+The v3.14.2 release removed sunset-flagged Groq / Cerebras / OpenRouter aliases and added new free-tier candidates, but the shell test suite (`tests/test_*.sh`) still referenced the dead aliases — `bash tests/test_litellm.sh` would have flagged "missing" routes (false negatives) and any `tests/test_*.sh` doing inline `POST /v1/chat/completions` with a removed model name would have failed with HTTP 400 "Invalid model name". This patch syncs the test scripts.
+
+- **`tests/test_litellm.sh`** — `EXPECTED_MODELS` array:
+  - Removed: `groq-llama-3.1-8b`, `groq-llama-3.3-70b`, `groq-llama-4-scout`, `groq-kimi-k2`, `groq-qwen3-32b`, `cerebras-qwen3-235b`, `cerebras-llama-3.1-8b`, `or-minimax-m2.5`.
+  - Added: `groq-qwen3.6-27b`, `groq-gpt-oss-safeguard-20b`, `or-nemotron-ultra-550b`, `or-nemotron-nano-9b`, `or-nemotron-nano-30b`.
+  - Inline `POST` body in the chat-completion smoke + streaming smoke switched from `groq-llama-3.1-8b` to `groq-gpt-oss-20b` (the recommended replacement per Groq's deprecation schedule).
+- **`tests/test_integration.sh`** — swapped `groq-llama-3.1-8b` → `groq-gpt-oss-20b` (2 call sites: website-identification LLM + integration ping-pong smoke).
+- **`tests/test_piston.sh`** — swapped `groq-llama-3.3-70b` → `groq-gpt-oss-120b` in the local LLM-model variable used by the code-execution-via-LLM smoke.
+- **`tests/test_proxq.sh`** — swapped `cerebras-llama-3.1-8b` → `cerebras-gpt-oss-120b` in the rate-limit smoke (cerebras free tier collapsed to 2 models; `gpt-oss-120b` is the survivor).
+- **`tests/test_security.sh`** — swapped `groq-llama-3.1-8b` → `groq-gpt-oss-20b` in the prompt-injection smoke.
+- **`tests/test_telethon.sh`** — swapped `groq-llama-3.3-70b` → `groq-gpt-oss-120b` in the bot-replies-with-LLM-response smoke.
+
+`shellcheck` clean on all six files (no new warnings vs `v3.14.2` HEAD).
+
 ## [v3.14.2] — 2026-06-28
 
 **Provider cleanup + pibox v0.11.2 (cheap schema retries). Removes sunset-flagged routes; adds new cloud models.**
