@@ -151,12 +151,13 @@ services:
 
   pibox-zai:
     profiles: ["pibox-zai"]
-    image: psyb0t/pibox:v0.11.1
+    image: psyb0t/pibox:v0.11.2
     restart: unless-stopped
     mem_limit: ${PIBOX_ZAI_MEM_LIMIT:-1g}
     memswap_limit: ${PIBOX_ZAI_MEMSWAP_LIMIT:-2g}
     cpus: ${PIBOX_ZAI_CPUS:-2.0}
     environment:
+      DEBUG: ${PIBOX_ZAI_DEBUG:-}
       PIBOX_API_MODE: "1"
       PIBOX_API_MODE_PORT: "8080"
       PIBOX_API_MODE_TOKEN: ${PIBOX_ZAI_API_TOKEN:-${AIGATE_TOKEN:-lulz-4-security-zai}}
@@ -1384,7 +1385,7 @@ services:
       JWT_REFRESH_SECRET: ${LIBRECHAT_JWT_SECRET}
       SEARCH: "false"
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-${AIGATE_TOKEN}}
-      LIBRECHAT_TITLE_MODEL: ${LIBRECHAT_TITLE_MODEL:-groq-llama-3.3-70b}
+      LIBRECHAT_TITLE_MODEL: ${LIBRECHAT_TITLE_MODEL:-groq-gpt-oss-120b}
       CONFIG_PATH: /app/librechat.yaml
     volumes:
       - ./librechat/librechat.yaml:/app/librechat.yaml:ro

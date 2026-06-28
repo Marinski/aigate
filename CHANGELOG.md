@@ -2,6 +2,57 @@
 
 All notable changes to this project are documented here.
 
+## [v3.14.2] — 2026-06-28
+
+**Provider cleanup + pibox v0.11.2 (cheap schema retries). Removes sunset-flagged routes; adds new cloud models.**
+
+### Pibox bump
+
+- `psyb0t/pibox:v0.11.1` → `v0.11.2` (tracks `aicodebox v0.10.0`). Schema-mode retries on `/openai/v1/chat/completions` no longer replay the full original prompt — base allocates an ephemeral `/tmp/aicodebox/<uuid>/` workspace (mode `0o700`) and session-continues the retry conversation with a minimal corrective prompt (error + directive + schema, ~1.5k tokens). A 100k-token request needing 3 retries used to pay 400k input tokens; now ~100k + ~4.5k. PiAdapter contract unchanged. Wire shape unchanged.
+
+### Provider model audit — removed dead/sunset routes
+
+Cross-checked every `litellm/config/providers/*.yaml` route against each provider's live `/v1/models` endpoint. Removed:
+
+- **Groq (sunset-flagged per Groq deprecations):**
+  - `groq-kimi-k2` (`moonshotai/kimi-k2-instruct` — sunset 2025-10-10, `-0905` variant sunset 2026-04-15)
+  - `groq-llama-3.1-8b` (`llama-3.1-8b-instant` — sunset 2026-08-16) → use `groq-gpt-oss-20b`
+  - `groq-llama-3.3-70b` (`llama-3.3-70b-versatile` — sunset 2026-08-16) → use `groq-gpt-oss-120b`
+  - `groq-llama-4-scout` (`meta-llama/llama-4-scout-17b-16e-instruct` — sunset 2026-07-17) → use `groq-gpt-oss-120b`
+  - `groq-qwen3-32b` (`qwen/qwen3-32b` — sunset 2026-07-17) → use `groq-gpt-oss-120b`
+- **Cerebras (free tier gutted to 2 models):**
+  - `cerebras-qwen3-235b` (`qwen-3-235b-a22b-instruct-2507`)
+  - `cerebras-llama-3.1-8b` (`llama3.1-8b`)
+- **OpenRouter:**
+  - `or-minimax-m2.5` (`minimax/minimax-m2.5:free` — `:free` variant pulled)
+
+### Renamed model fields (alias names stable)
+
+- `groq-compound`: `groq/compound-beta` → `groq/compound`
+- `groq-compound-mini`: `groq/compound-beta-mini` → `groq/compound-mini`
+
+### Added routes
+
+- `groq-qwen3.6-27b` (`qwen/qwen3.6-27b`)
+- `groq-gpt-oss-safeguard-20b` (`openai/gpt-oss-safeguard-20b`)
+- `or-nemotron-ultra-550b` (`nvidia/nemotron-3-ultra-550b-a55b:free`, 1M ctx)
+- `or-nemotron-nano-9b` (`nvidia/nemotron-nano-9b-v2:free`)
+- `or-nemotron-nano-30b` (`nvidia/nemotron-3-nano-30b-a3b:free`, 256k ctx, reasoning)
+
+### Config hygiene
+
+- `litellm/config/fallbacks.json`: purged every reference to removed aliases (both as keys and chain values). 106 → 98 chains.
+- `docs/providers.md`: Groq + Cerebras + OpenRouter tables rewritten; fallback example sentence updated to use a non-deprecated alias.
+- `docs/services/librechat.md` + `docs/services/browser.md` + `README.md`: stale example/default model references swapped to live aliases.
+- `LIBRECHAT_TITLE_MODEL` default flipped from `groq-llama-3.3-70b` → `groq-gpt-oss-120b` in `docker-compose.yml` + `.env.example` (active `.env` updated locally).
+
+### Tests / verification
+
+- `make build-config` → assembles 109 active models (was 112).
+- All removed aliases return HTTP 400 "Invalid model name" through `/v1/chat/completions`.
+- All new aliases serve OK end-to-end via litellm.
+- Pibox `v0.11.2` post-deploy: 78% one-shot success, retry-attempt token cost flat (~12k/attempt avg) vs `v0.11.1` where each attempt re-paid the full prompt.
+
 ## [v3.14.1] — 2026-06-22
 
 **Bump pibox v0.11.0 → v0.11.1 — tracks aicodebox v0.9.1 base; schema-mode retry prompt now carries the original task.**
