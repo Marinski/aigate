@@ -93,3 +93,4 @@ COUNTER_REVIEW.md
 # into for talkies custom-voice cloning; the processed (slugified subdir +
 # transcript .txt) form lives under ${DATA_DIR_TALKIES}/custom-voices/
 .custom_voices/
+.telemetry/

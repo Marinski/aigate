@@ -38,28 +38,23 @@ Sign up: [console.groq.com](https://console.groq.com) — no credit card require
 
 | Model                          | Alias                               | Notes           |
 | ------------------------------ | ----------------------------------- | --------------- |
-| llama-3.1-8b-instant           | `groq-llama-3.1-8b`                 | fast            |
-| llama-3.3-70b-versatile        | `groq-llama-3.3-70b`                |                 |
-| llama-4-scout-17b-16e-instruct | `groq-llama-4-scout`                | multimodal      |
-| moonshotai/kimi-k2-instruct    | `groq-kimi-k2`                      |                 |
-| openai/gpt-oss-20b             | `groq-gpt-oss-20b`                  |                 |
-| openai/gpt-oss-120b            | `groq-gpt-oss-120b`                 |                 |
-| qwen/qwen3-32b                 | `groq-qwen3-32b`                    |                 |
-| compound-beta                  | `groq-compound`                     | tool use        |
-| compound-beta-mini             | `groq-compound-mini`                | tool use, fast  |
+| openai/gpt-oss-20b             | `groq-gpt-oss-20b`                  | small, fast     |
+| openai/gpt-oss-120b            | `groq-gpt-oss-120b`                 | flagship        |
+| openai/gpt-oss-safeguard-20b   | `groq-gpt-oss-safeguard-20b`        | safety filter   |
+| qwen/qwen3.6-27b               | `groq-qwen3.6-27b`                  | mid-size        |
+| compound                       | `groq-compound`                     | tool use        |
+| compound-mini                  | `groq-compound-mini`                | tool use, fast  |
 | whisper-large-v3               | `groq-whisper-large-v3`             | transcription   |
 | whisper-large-v3-turbo         | `groq-whisper-large-v3-turbo`       | transcription, fast |
 
 ## Cerebras (free tier — 5 RPM / 30K TPM / 1M TPD, no CC)
 
-Sign up: [cloud.cerebras.ai](https://cloud.cerebras.ai) — no credit card required. The "Free Trial" plan covers **4 models only** (`qwen-3-235b`, `gpt-oss-120b`, `zai-glm-4.7`, `llama3.1-8b`) and is capped at **5 requests per minute / 30K tokens per minute / 1M tokens per hour / 1M tokens per day** per model. Token bucketing — quota replenishes continuously, not on a fixed reset. The 5 RPM ceiling burns out long before the 1M TPD budget on any real workload. Limits page: [inference-docs.cerebras.ai/support/rate-limits](https://inference-docs.cerebras.ai/support/rate-limits). Among the fastest inference available (Llama 3.1 8B ~1,800 t/s, Qwen3 235B ~1,400 t/s).
+Sign up: [cloud.cerebras.ai](https://cloud.cerebras.ai) — no credit card required. The "Free Trial" plan currently exposes **2 models** (`gpt-oss-120b`, `zai-glm-4.7`) and is capped at **5 requests per minute / 30K tokens per minute / 1M tokens per hour / 1M tokens per day** per model. Token bucketing — quota replenishes continuously, not on a fixed reset. The 5 RPM ceiling burns out long before the 1M TPD budget on any real workload. Limits page: [inference-docs.cerebras.ai/support/rate-limits](https://inference-docs.cerebras.ai/support/rate-limits). Among the fastest inference available.
 
 | Model                          | Alias                    | Notes                         |
 | ------------------------------ | ------------------------ | ----------------------------- |
-| qwen-3-235b-a22b-instruct-2507 | `cerebras-qwen3-235b`    | flagship, very fast — free-tier eligible |
 | gpt-oss-120b                   | `cerebras-gpt-oss-120b`  | free-tier eligible            |
 | zai-glm-4.7                    | `cerebras-glm-4.7`       | free-tier eligible            |
-| llama3.1-8b                    | `cerebras-llama-3.1-8b`  | fastest, free-tier eligible   |
 
 ## OpenRouter (free tier — 50 RPD at $0, 1000 RPD at $10+)
 
@@ -71,7 +66,9 @@ Sign up: [openrouter.ai](https://openrouter.ai) — 50 req/day free across all `
 | qwen/qwen3-coder                     | `or-qwen3-coder`   |
 | qwen/qwen3-next-80b-a3b-instruct     | `or-qwen3-80b`     |
 | nvidia/nemotron-3-super-120b-a12b    | `or-nemotron-120b` |
-| minimax/minimax-m2.5                 | `or-minimax-m2.5`  |
+| nvidia/nemotron-3-ultra-550b-a55b    | `or-nemotron-ultra-550b` |
+| nvidia/nemotron-nano-9b-v2           | `or-nemotron-nano-9b` |
+| nvidia/nemotron-3-nano-30b-a3b       | `or-nemotron-nano-30b` |
 | meta-llama/llama-3.3-70b-instruct    | `or-llama-3.3-70b` |
 | openai/gpt-oss-120b                  | `or-gpt-oss-120b`  |
 | openai/gpt-oss-20b                   | `or-gpt-oss-20b`   |
@@ -320,4 +317,4 @@ Same wrapper as the CPU variant but with `--n-gpu-layers 999` and the CUDA base 
 
 Every model has its own fallback chain. When a provider fails, is rate-limited, or returns an error, LiteLLM automatically tries the next model in the chain. Free providers are always tried first.
 
-For example, `groq-llama-3.3-70b` falls back through `cerebras-qwen3-235b` → `mistral-small` → `cohere-command-r` → `or-llama-3.3-70b` → `hf-llama-3.3-70b` → `claudebox-sonnet` → `pibox-zai-glm-4.7` → `openai-gpt-4o`. See `litellm/config/fallbacks.json` for all chains.
+For example, `groq-gpt-oss-120b` falls back through `cerebras-gpt-oss-120b` → `mistral-large` → `or-gpt-oss-120b` → `hf-llama-3.3-70b` → `openai-gpt-4o`. See `litellm/config/fallbacks.json` for all chains.

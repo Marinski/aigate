@@ -143,7 +143,7 @@ requests.put(
 # ask an LLM to summarize
 r = requests.post(f"{BASE}/chat/completions",
     headers={"Authorization": f"Bearer {LITELLM_MASTER_KEY}", "Content-Type": "application/json"},
-    json={"model": "cerebras-qwen3-235b", "messages": [
+    json={"model": "cerebras-gpt-oss-120b", "messages": [
         {"role": "user", "content": f"Summarize these search results:\n\n{text[:8000]}"}
     ]})
 print(r.json()["choices"][0]["message"]["content"])

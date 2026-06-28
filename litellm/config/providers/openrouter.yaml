@@ -18,9 +18,19 @@
     model: openrouter/nvidia/nemotron-3-super-120b-a12b:free
     api_key: os.environ/OPENROUTER_API_KEY
 
-- model_name: or-minimax-m2.5
+- model_name: or-nemotron-ultra-550b
   litellm_params:
-    model: openrouter/minimax/minimax-m2.5:free
+    model: openrouter/nvidia/nemotron-3-ultra-550b-a55b:free
+    api_key: os.environ/OPENROUTER_API_KEY
+
+- model_name: or-nemotron-nano-9b
+  litellm_params:
+    model: openrouter/nvidia/nemotron-nano-9b-v2:free
+    api_key: os.environ/OPENROUTER_API_KEY
+
+- model_name: or-nemotron-nano-30b
+  litellm_params:
+    model: openrouter/nvidia/nemotron-3-nano-30b-a3b:free
     api_key: os.environ/OPENROUTER_API_KEY
 
 - model_name: or-llama-3.3-70b

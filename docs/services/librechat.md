@@ -24,7 +24,7 @@ All MCP tools from the LiteLLM aggregated endpoint are available in LibreChat co
 | `LIBRECHAT_CREDS_KEY`                 | —                                        | Encryption key for stored credentials (64 hex chars) |
 | `LIBRECHAT_CREDS_IV`                  | —                                        | Encryption IV (32 hex chars)                 |
 | `LIBRECHAT_JWT_SECRET`                | —                                        | JWT signing secret                           |
-| `LIBRECHAT_TITLE_MODEL`               | `groq-llama-3.3-70b`                     | Model for auto-titling conversations         |
+| `LIBRECHAT_TITLE_MODEL`               | `groq-gpt-oss-120b`                      | Model for auto-titling conversations         |
 | `LIBRECHAT_ALLOW_REGISTRATION`        | `true`                                   | Set to `false` after creating admin account  |
 | `LIBRECHAT_ALLOW_EMAIL_LOGIN`         | `true`                                   | Enable email/password login                  |
 | `LIBRECHAT_ALLOW_SOCIAL_LOGIN`        | `false`                                  | Enable social login providers                |

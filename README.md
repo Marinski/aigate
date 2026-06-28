@@ -207,14 +207,14 @@ Models across multiple providers. Six offer free tiers with no credit card requi
 
 Every model has a fallback chain defined in `litellm/config/fallbacks.json`. When a provider fails or rate-limits, LiteLLM tries the next one automatically. You request one model — the gateway figures out who can actually serve it.
 
-Example: you request `groq-llama-3.3-70b`. Groq returns 429 (rate limited). LiteLLM silently retries with `cerebras-qwen3-235b`. Cerebras is down. It tries `mistral-small`. Mistral responds. You get the response — same format, same schema, no error. The `model` field in the response tells you which provider actually served it.
+Example: you request `groq-gpt-oss-120b`. Groq returns 429 (rate limited). LiteLLM silently retries with `cerebras-gpt-oss-120b`. Cerebras is down. It tries `mistral-large`. Mistral responds. You get the response — same format, same schema, no error. The `model` field in the response tells you which provider actually served it.
 
 ```
-groq-llama-3.3-70b → 429 rate limited
+groq-gpt-oss-120b → 429 rate limited
   ↓ fallback
-cerebras-qwen3-235b → 503 unavailable
+cerebras-gpt-oss-120b → 503 unavailable
   ↓ fallback
-mistral-small → 200 ✓
+mistral-large → 200 ✓
 ```
 
 For LLM chat models, chains follow the priority tiers: free cloud first, then flat-rate, then pay-per-token, then local. For image, TTS, and STT models, local models are preferred over paid cloud (they're free and have no rate limits). Small models fall back to other small models. Code models fall back to other code models. Local CUDA models fall back to local CPU models.
@@ -449,7 +449,7 @@ On first start, Ollama will pull all local models in the background. talkies pre
 curl http://localhost:4000/chat/completions \
   -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"model": "cerebras-qwen3-235b", "messages": [{"role": "user", "content": "hello"}]}'
+  -d '{"model": "cerebras-gpt-oss-120b", "messages": [{"role": "user", "content": "hello"}]}'
 
 # local model (no network, no rate limits)
 curl http://localhost:4000/chat/completions \
@@ -545,7 +545,7 @@ Any request sent through `/q/` is queued and processed in the background — use
 curl http://localhost:4000/q/v1/chat/completions \
   -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"model": "cerebras-qwen3-235b", "messages": [{"role": "user", "content": "write a novel"}]}'
+  -d '{"model": "cerebras-gpt-oss-120b", "messages": [{"role": "user", "content": "write a novel"}]}'
 # → 202 {"jobId": "550e8400-e29b-41d4-a716-446655440000"}
 
 # check status
