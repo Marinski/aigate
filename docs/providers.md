@@ -138,13 +138,20 @@ Set up with `claude setup-token` or generate at [console.anthropic.com](https://
 
 [z.ai](https://z.ai) provides an Anthropic-compatible API backed by GLM models. Routed through [pibox](https://github.com/psyb0t/docker-pibox) — [pi-coding-agent](https://github.com/earendil-works/pi-mono) wrapped in an API server, pointed at z.ai. Same agentic capabilities (shell, files, tools, MCP) as claudebox. Why pibox over a second claudebox: pi speaks the Anthropic wire protocol natively, no Claude Code license/OAuth ceremony, and pibox adds a `/files/*` CRUD API plus optional Telegram + cron modes for free. The `-zai` suffix names the upstream — future `PIBOX_*` flags can run pi against OpenAI, OpenRouter, etc.
 
-| Alias                       | Underlying model |
-| --------------------------- | ---------------- |
-| `pibox-zai-glm-4.5-air`     | GLM-4.5-Air      |
-| `pibox-zai-glm-4.7`         | GLM-4.7          |
-| `pibox-zai-glm-5.1`         | GLM-5.1          |
+| Alias                       | Underlying model | Notes                                                              |
+| --------------------------- | ---------------- | ------------------------------------------------------------------ |
+| `pibox-zai-glm-5.2`         | GLM-5.2          | Newest flagship (2026-06-17). 3× quota peak / 2× off-peak.         |
+| `pibox-zai-glm-5.1`         | GLM-5.1          | 3× quota peak / 2× off-peak.                                       |
+| `pibox-zai-glm-5-turbo`     | GLM-5-Turbo      | Fast tier. 3× quota peak / 2× off-peak.                            |
+| `pibox-zai-glm-5`           | GLM-5            | Earlier 5-series. 3× quota peak / 2× off-peak.                     |
+| `pibox-zai-glm-4.7`         | GLM-4.7          | Baseline 1× quota. Default for batch / catalog work.               |
+| `pibox-zai-glm-4.6`         | GLM-4.6          | Baseline 1× quota.                                                 |
+| `pibox-zai-glm-4.5`         | GLM-4.5          | Baseline 1× quota.                                                 |
+| `pibox-zai-glm-4.5-air`     | GLM-4.5-Air      | Smallest / cheapest. Baseline 1× quota.                            |
 
-Override the exposed list with `PIBOX_ZAI_AVAILABLE_MODELS=glm-4.5-air,glm-4.7,glm-5.1` and the default model with `PIBOX_ZAI_DEFAULT_MODEL=glm-4.7` in `.env`.
+Override the exposed list with `PIBOX_ZAI_AVAILABLE_MODELS=glm-4.5,glm-4.5-air,glm-4.6,glm-4.7,glm-5,glm-5-turbo,glm-5.1,glm-5.2` and the default model with `PIBOX_ZAI_DEFAULT_MODEL=glm-4.7` in `.env`. The full list is also the compose default — set the override only to subset.
+
+**Quota note.** GLM Coding Plan meters the 5-series at **3× during Beijing peak (14:00–18:00)** and 2× off-peak (or 1× off-peak under z.ai's current promo through end of September 2026). The 4-series bills at the flat 1× rate. Pick `glm-4.7` for routine / batch / catalog work to stretch the subscription quota; reserve the 5-series for hard tasks.
 
 ## Anthropic (optional, API key required)
 

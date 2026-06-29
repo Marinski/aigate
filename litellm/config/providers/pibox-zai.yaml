@@ -57,15 +57,45 @@
 #       },
 #   )
 
+- model_name: pibox-zai-glm-5.2
+  litellm_params:
+    model: openai/glm-5.2
+    api_base: http://pibox-zai:8080/openai/v1
+    api_key: os.environ/PIBOX_ZAI_API_TOKEN
+
 - model_name: pibox-zai-glm-5.1
   litellm_params:
     model: openai/glm-5.1
     api_base: http://pibox-zai:8080/openai/v1
     api_key: os.environ/PIBOX_ZAI_API_TOKEN
 
+- model_name: pibox-zai-glm-5-turbo
+  litellm_params:
+    model: openai/glm-5-turbo
+    api_base: http://pibox-zai:8080/openai/v1
+    api_key: os.environ/PIBOX_ZAI_API_TOKEN
+
+- model_name: pibox-zai-glm-5
+  litellm_params:
+    model: openai/glm-5
+    api_base: http://pibox-zai:8080/openai/v1
+    api_key: os.environ/PIBOX_ZAI_API_TOKEN
+
 - model_name: pibox-zai-glm-4.7
   litellm_params:
     model: openai/glm-4.7
+    api_base: http://pibox-zai:8080/openai/v1
+    api_key: os.environ/PIBOX_ZAI_API_TOKEN
+
+- model_name: pibox-zai-glm-4.6
+  litellm_params:
+    model: openai/glm-4.6
+    api_base: http://pibox-zai:8080/openai/v1
+    api_key: os.environ/PIBOX_ZAI_API_TOKEN
+
+- model_name: pibox-zai-glm-4.5
+  litellm_params:
+    model: openai/glm-4.5
     api_base: http://pibox-zai:8080/openai/v1
     api_key: os.environ/PIBOX_ZAI_API_TOKEN
 

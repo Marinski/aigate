@@ -2,6 +2,34 @@
 
 All notable changes to this project are documented here.
 
+## [v3.14.4] — 2026-06-29
+
+**Expose all 8 z.ai GLM models. Adds `glm-5.2` (new flagship), `glm-5-turbo`, `glm-5`, `glm-4.6`, `glm-4.5`. No removals.**
+
+z.ai's live catalog at `https://api.z.ai/api/anthropic/v1/models` lists 8 GLM models; aigate was only exposing 3 (`glm-4.5-air`, `glm-4.7`, `glm-5.1`). This release brings the pibox-zai route surface up to parity with what z.ai actually serves.
+
+### Added LiteLLM routes (`litellm/config/providers/pibox-zai.yaml`)
+
+- `pibox-zai-glm-5.2` → `openai/glm-5.2` — newest flagship, dropped 2026-06-17
+- `pibox-zai-glm-5-turbo` → `openai/glm-5-turbo` — fast tier
+- `pibox-zai-glm-5` → `openai/glm-5` — earlier 5-series
+- `pibox-zai-glm-4.6` → `openai/glm-4.6`
+- `pibox-zai-glm-4.5` → `openai/glm-4.5`
+
+All five smoke-tested end-to-end (`POST /v1/chat/completions` via litellm → pibox → z.ai). Returns content. Original three routes unchanged.
+
+### Pibox container env
+
+`PIBOX_AVAILABLE_MODELS` default expanded from `glm-4.5-air,glm-4.7,glm-5.1` → `glm-4.5,glm-4.5-air,glm-4.6,glm-4.7,glm-5,glm-5-turbo,glm-5.1,glm-5.2`. `docker-compose.yml` + `.env.example` updated. Pibox restart required (`docker compose up -d pibox-zai`) for the container to advertise all eight on `/openai/v1/models`.
+
+### Docs
+
+- `docs/providers.md` — pibox-zai table rewritten with all eight aliases, GLM Coding Plan quota multipliers per model (4-series = baseline 1×, 5-series = 3× peak / 2× off-peak, current 1× off-peak promo through end of September 2026 noted), recommendation to default to `glm-4.7` for batch / catalog work.
+
+### Quota awareness (operator note)
+
+Z.ai bills `glm-5.x` and `glm-5-turbo` at **3× during Beijing peak (14:00–18:00)** and 2× off-peak (1× under their current promo). The `glm-4.x` family bills at the flat baseline 1× rate. Adding the 5-series routes does not change billing for existing 4.x callers, but operators should be aware that defaulting an integration to `glm-5.2` will burn quota ~3× faster than `glm-4.7` during peak hours.
+
 ## [v3.14.3] — 2026-06-28
 
 **Test-script catch-up to v3.14.2 provider audit. No prod / API / docs changes.**
